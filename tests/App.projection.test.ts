@@ -130,4 +130,59 @@ describe('App projection wiring', () => {
       wrapper.unmount();
     }
   });
+
+  it('runs scenario selector actions without breaking the calculator', async () => {
+    const [{ mount }, { default: AppShell }] = await Promise.all([
+      import('@vue/test-utils'),
+      import('../src/app/AppShell')
+    ]);
+    const originalPrompt = globalThis.prompt;
+    const originalConfirm = globalThis.confirm;
+    globalThis.prompt = () => 'Renamed scenario';
+    globalThis.confirm = () => true;
+    const wrapper = mount(AppShell);
+
+    try {
+      const scenarioSelect = wrapper.get('select[aria-label="Current scenario"]');
+      const initialScenarioId = (scenarioSelect.findAll('option')[0].element as HTMLOptionElement)
+        .value;
+
+      await wrapper.get('input[aria-label="Mortgage amount"]').setValue('250000');
+      expect(wrapper.text()).toContain('$1,454.01');
+
+      const newButton = wrapper.findAll('button').find((button) => button.text() === 'New');
+      expect(newButton).toBeTruthy();
+      await newButton?.trigger('click');
+
+      expect(wrapper.text()).toContain('Scenario 2');
+      expect(wrapper.text()).toContain('$2,908.02');
+
+      await wrapper.get('select[aria-label="Current scenario"]').setValue(initialScenarioId);
+      expect(wrapper.text()).toContain('$1,454.01');
+
+      const duplicateButton = wrapper
+        .findAll('button')
+        .find((button) => button.text() === 'Duplicate');
+      expect(duplicateButton).toBeTruthy();
+      await duplicateButton?.trigger('click');
+      expect(wrapper.text()).toContain('Scenario 1 copy');
+      expect(wrapper.text()).toContain('$1,454.01');
+
+      const renameButton = wrapper.findAll('button').find((button) => button.text() === 'Rename');
+      expect(renameButton).toBeTruthy();
+      await renameButton?.trigger('click');
+      expect(wrapper.text()).toContain('Renamed scenario');
+
+      const deleteButton = wrapper.findAll('button').find((button) => button.text() === 'Delete');
+      expect(deleteButton).toBeTruthy();
+      await deleteButton?.trigger('click');
+      expect(wrapper.text()).not.toContain('Renamed scenario');
+      expect(wrapper.text()).toContain('Scenario 2');
+      expect(wrapper.text()).toContain('$2,908.02');
+    } finally {
+      globalThis.prompt = originalPrompt;
+      globalThis.confirm = originalConfirm;
+      wrapper.unmount();
+    }
+  });
 });

@@ -4,12 +4,9 @@ import {
   getCoreRowModel,
   useVueTable
 } from '@tanstack/vue-table';
-import { computed, defineComponent, h, reactive } from 'vue';
+import { computed, defineComponent, h } from 'vue';
 import { formatDate, formatMoney, formatPercent } from './formatters';
-import { projectMortgageScenario } from '../domain/mortgageCalculator';
 import type {
-  LumpSumEvent,
-  MortgageProjection,
   MortgageScenario,
   PaymentFrequency,
   PaymentStrategy,
@@ -20,68 +17,74 @@ import type {
   RenewalEvent
 } from '../domain/mortgageTypes';
 import { PAYMENT_FREQUENCY_METADATA } from '../domain/paymentFrequency';
+import {
+  useScenarioStore,
+  type LumpSumInputUpdate,
+  type MortgageInputUpdate,
+  type RenewalInputUpdate
+} from '../stores/scenarioStore';
 
-export type MortgageInputUpdate = Partial<{
-  principalAmount: number;
-  startDate: string;
-  amortizationMonths: number;
-  termMonths: number;
-  annualInterestRate: number;
-  paymentFrequency: PaymentFrequency;
-}>;
-
-export type LumpSumInputUpdate = Partial<{
-  date: string;
-  amount: number;
-  label: string;
-}>;
-
-export type RenewalInputUpdate = Partial<{
-  effectiveDate: string;
-  termMonths: number;
-  annualInterestRate: number;
-  paymentFrequency: PaymentFrequency;
-  paymentStrategy: PaymentStrategy;
-  note: string;
-}>;
-
-const today = new Date().toISOString().slice(0, 10);
-let nextLumpSumId = 1;
-let nextRenewalId = 1;
-
-function makeDefaultScenario(): MortgageScenario {
-  return {
-    id: 'scenario-1',
-    name: 'Scenario 1',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    currency: 'CAD',
-    startDate: today,
-    principalAmount: 500_000,
-    amortizationMonths: 25 * 12,
-    paymentFrequency: 'monthly',
-    initialTerm: {
-      id: 'term-initial',
-      startDate: today,
-      termMonths: 5 * 12,
-      annualInterestRate: 0.05,
-      paymentFrequency: 'monthly',
-      paymentStrategy: 'recalculate-payment'
-    },
-    lumpSums: [],
-    renewals: []
-  };
-}
+type ScenarioOption = {
+  readonly id: string;
+  readonly name: string;
+};
 
 const ScenarioBar = defineComponent({
   name: 'ScenarioBar',
   props: {
-    scenarioName: {
-      type: String,
+    scenarios: {
+      type: Array as () => readonly ScenarioOption[],
       required: true
+    },
+    activeScenarioId: {
+      type: String as () => string | null,
+      required: false,
+      default: null
     }
   },
-  setup(props) {
+  emits: {
+    switchScenario: (_id: string) => true,
+    createScenario: () => true,
+    duplicateScenario: () => true,
+    renameScenario: (_id: string, _name: string) => true,
+    deleteScenario: (_id: string) => true
+  },
+  setup(props, { emit }) {
+    function getActiveScenario(): ScenarioOption | undefined {
+      return (
+        props.scenarios.find((scenario) => scenario.id === props.activeScenarioId) ??
+        props.scenarios[0]
+      );
+    }
+
+    function renameActiveScenario(): void {
+      const scenario = getActiveScenario();
+
+      if (!scenario) {
+        return;
+      }
+
+      const nextName = globalThis.prompt?.('Rename scenario', scenario.name);
+
+      if (nextName !== null && nextName !== undefined) {
+        emit('renameScenario', scenario.id, nextName);
+      }
+    }
+
+    function deleteActiveScenario(): void {
+      const scenario = getActiveScenario();
+
+      if (!scenario) {
+        return;
+      }
+
+      const confirmed = globalThis.confirm?.(`Delete "${scenario.name}"?`) ?? true;
+
+      if (confirmed) {
+        emit('deleteScenario', scenario.id);
+      }
+    }
+
     return () =>
       h('header', { class: 'scenario-bar', 'aria-label': 'Scenario controls' }, [
         h('div', [
@@ -92,16 +95,25 @@ const ScenarioBar = defineComponent({
             {
               id: 'scenario-select',
               class: 'scenario-select',
-              'aria-label': 'Current scenario'
+              'aria-label': 'Current scenario',
+              value: props.activeScenarioId ?? props.scenarios[0]?.id,
+              onChange: (event: Event) =>
+                emit('switchScenario', (event.target as HTMLSelectElement).value)
             },
-            [h('option', props.scenarioName)]
+            props.scenarios.map((scenario) =>
+              h('option', { key: scenario.id, value: scenario.id }, scenario.name)
+            )
           )
         ]),
         h('nav', { class: 'scenario-actions', 'aria-label': 'Scenario actions' }, [
-          h('button', { type: 'button' }, 'New'),
-          h('button', { type: 'button' }, 'Duplicate'),
-          h('button', { type: 'button' }, 'Rename'),
-          h('button', { type: 'button', class: 'danger-button' }, 'Delete')
+          h('button', { type: 'button', onClick: () => emit('createScenario') }, 'New'),
+          h('button', { type: 'button', onClick: () => emit('duplicateScenario') }, 'Duplicate'),
+          h('button', { type: 'button', onClick: renameActiveScenario }, 'Rename'),
+          h(
+            'button',
+            { type: 'button', class: 'danger-button', onClick: deleteActiveScenario },
+            'Delete'
+          )
         ])
       ]);
   }
@@ -802,151 +814,22 @@ const LumpSumEditorShell = defineComponent({
 export default defineComponent({
   name: 'AppShell',
   setup() {
-    const scenario = reactive<MortgageScenario>(makeDefaultScenario());
-    const projection = computed<MortgageProjection>(() => projectMortgageScenario(scenario));
+    const store = useScenarioStore();
 
-    function updateScenario(update: MortgageInputUpdate): void {
-      if (update.principalAmount !== undefined) {
-        scenario.principalAmount = update.principalAmount;
-      }
+    return () => {
+      const scenario = store.activeScenario.value;
+      const projection = store.projection.value;
 
-      if (update.startDate !== undefined) {
-        const startDate = update.startDate;
-        scenario.startDate = startDate;
-        scenario.initialTerm.startDate = startDate;
-        scenario.lumpSums = scenario.lumpSums.map((lumpSum) => ({
-          ...lumpSum,
-          date: lumpSum.date < startDate ? startDate : lumpSum.date
-        }));
-        scenario.renewals = scenario.renewals.map((renewal) => ({
-          ...renewal,
-          effectiveDate: renewal.effectiveDate < startDate ? startDate : renewal.effectiveDate
-        }));
-      }
-
-      if (update.amortizationMonths !== undefined) {
-        scenario.amortizationMonths = update.amortizationMonths;
-      }
-
-      if (update.termMonths !== undefined) {
-        scenario.initialTerm.termMonths = update.termMonths;
-      }
-
-      if (update.annualInterestRate !== undefined) {
-        scenario.initialTerm.annualInterestRate = update.annualInterestRate;
-      }
-
-      if (update.paymentFrequency !== undefined) {
-        scenario.paymentFrequency = update.paymentFrequency;
-        scenario.initialTerm.paymentFrequency = update.paymentFrequency;
-      }
-
-      scenario.updatedAt = new Date().toISOString();
-    }
-
-    function touchScenario(): void {
-      scenario.updatedAt = new Date().toISOString();
-    }
-
-    function addLumpSum(): void {
-      scenario.lumpSums.push({
-        id: `lump-sum-${Date.now()}-${nextLumpSumId}`,
-        date: scenario.startDate,
-        amount: 1_000,
-        label: undefined
-      });
-      nextLumpSumId += 1;
-      touchScenario();
-    }
-
-    function updateLumpSum(id: string, update: LumpSumInputUpdate): void {
-      const lumpSum = scenario.lumpSums.find((candidate) => candidate.id === id);
-
-      if (!lumpSum) {
-        return;
-      }
-
-      if (update.date !== undefined && update.date) {
-        lumpSum.date = update.date < scenario.startDate ? scenario.startDate : update.date;
-      }
-
-      if (update.amount !== undefined) {
-        lumpSum.amount = Math.max(1, update.amount);
-      }
-
-      if (update.label !== undefined) {
-        const label = update.label.trim();
-        lumpSum.label = label.length > 0 ? label : undefined;
-      }
-
-      touchScenario();
-    }
-
-    function deleteLumpSum(id: string): void {
-      scenario.lumpSums = scenario.lumpSums.filter((lumpSum: LumpSumEvent) => lumpSum.id !== id);
-      touchScenario();
-    }
-
-    function addRenewal(): void {
-      scenario.renewals.push({
-        id: `renewal-${Date.now()}-${nextRenewalId}`,
-        effectiveDate: scenario.startDate,
-        termMonths: scenario.initialTerm.termMonths,
-        annualInterestRate: scenario.initialTerm.annualInterestRate,
-        paymentFrequency: scenario.paymentFrequency,
-        paymentStrategy: 'recalculate-payment',
-        note: undefined
-      });
-      nextRenewalId += 1;
-      touchScenario();
-    }
-
-    function updateRenewal(id: string, update: RenewalInputUpdate): void {
-      const renewal = scenario.renewals.find((candidate) => candidate.id === id);
-
-      if (!renewal) {
-        return;
-      }
-
-      if (update.effectiveDate !== undefined && update.effectiveDate) {
-        renewal.effectiveDate =
-          update.effectiveDate < scenario.startDate ? scenario.startDate : update.effectiveDate;
-      }
-
-      if (update.termMonths !== undefined) {
-        renewal.termMonths = Math.max(1, update.termMonths);
-      }
-
-      if (update.annualInterestRate !== undefined) {
-        renewal.annualInterestRate = Math.max(0, update.annualInterestRate);
-      }
-
-      if (update.paymentFrequency !== undefined) {
-        renewal.paymentFrequency = update.paymentFrequency;
-      }
-
-      if (update.paymentStrategy !== undefined) {
-        renewal.paymentStrategy = update.paymentStrategy;
-      }
-
-      if (update.note !== undefined) {
-        const note = update.note.trim();
-        renewal.note = note.length > 0 ? note : undefined;
-      }
-
-      touchScenario();
-    }
-
-    function deleteRenewal(id: string): void {
-      scenario.renewals = scenario.renewals.filter(
-        (renewal: RenewalEvent) => renewal.id !== id
-      );
-      touchScenario();
-    }
-
-    return () =>
-      h('div', { class: 'app-shell' }, [
-        h(ScenarioBar, { scenarioName: scenario.name }),
+      return h('div', { class: 'app-shell' }, [
+        h(ScenarioBar, {
+          scenarios: store.state.scenarios,
+          activeScenarioId: store.state.activeScenarioId,
+          onSwitchScenario: store.switchActiveScenario,
+          onCreateScenario: store.createScenario,
+          onDuplicateScenario: store.duplicateActiveScenario,
+          onRenameScenario: store.renameScenario,
+          onDeleteScenario: store.deleteScenario
+        }),
         h('main', { class: 'dashboard', 'aria-label': 'Mortgage calculator dashboard' }, [
           h('section', { class: 'analysis-area', 'aria-labelledby': 'analysis-heading' }, [
             h('div', { class: 'section-heading' }, [
@@ -954,35 +837,36 @@ export default defineComponent({
                 h('p', { class: 'eyebrow' }, 'Analysis'),
                 h('h1', { id: 'analysis-heading' }, 'Mortgage projection')
               ]),
-              h('span', { class: 'status-pill' }, `${projection.value.schedule.length} payments`)
+              h('span', { class: 'status-pill' }, `${projection.schedule.length} payments`)
             ]),
-            h(SummaryMetrics, { summary: projection.value.summary }),
+            h(SummaryMetrics, { summary: projection.summary }),
             h('div', { class: 'chart-grid', 'aria-label': 'Projection charts' }, [
-              h(BalanceChart, { series: projection.value.chartSeries.balanceOverTime }),
-              h(PaymentBreakdownChart, { series: projection.value.chartSeries.paymentBreakdown })
+              h(BalanceChart, { series: projection.chartSeries.balanceOverTime }),
+              h(PaymentBreakdownChart, { series: projection.chartSeries.paymentBreakdown })
             ]),
-            h(PaymentScheduleTable, { rows: projection.value.schedule })
+            h(PaymentScheduleTable, { rows: projection.schedule })
           ]),
           h('aside', { class: 'editing-panel', 'aria-label': 'Scenario editing panel' }, [
             h(MortgageInputs, {
               scenario,
-              onUpdateScenario: updateScenario
+              onUpdateScenario: store.updateScenario
             }),
             h(RenewalEditorShell, {
               scenario,
-              onAddRenewal: addRenewal,
-              onUpdateRenewal: updateRenewal,
-              onDeleteRenewal: deleteRenewal
+              onAddRenewal: store.addRenewal,
+              onUpdateRenewal: store.updateRenewal,
+              onDeleteRenewal: store.deleteRenewal
             }),
             h(LumpSumEditorShell, {
               scenario,
-              onAddLumpSum: addLumpSum,
-              onUpdateLumpSum: updateLumpSum,
-              onDeleteLumpSum: deleteLumpSum
+              onAddLumpSum: store.addLumpSum,
+              onUpdateLumpSum: store.updateLumpSum,
+              onDeleteLumpSum: store.deleteLumpSum
             }),
-            h(ProjectionWarningsPanel, { warnings: projection.value.warnings })
+            h(ProjectionWarningsPanel, { warnings: projection.warnings })
           ])
         ])
       ]);
+    };
   }
 });
