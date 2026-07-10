@@ -5,11 +5,13 @@ import type {
   LumpSumEvent,
   MortgageProjection,
   MortgageScenario,
+  PaymentStrategy,
   PaymentFrequency,
   PaymentScheduleRow,
   ProjectionChartSeries,
   ProjectionSummary,
-  ProjectionWarning
+  ProjectionWarning,
+  RenewalEvent
 } from './mortgageTypes';
 import { getPaymentsPerYear } from './paymentFrequency';
 
@@ -21,6 +23,18 @@ type AppliedLumpSums = {
   appliedAmount: number;
   notes: string[];
 };
+
+type ActiveTerm = {
+  id: string;
+  startDate: string;
+  termMonths: number;
+  annualInterestRate: number;
+  paymentFrequency: PaymentFrequency;
+  paymentStrategy: PaymentStrategy;
+};
+
+type RenewalMarker = ProjectionChartSeries['renewalMarkers'][number];
+type TermBand = ProjectionChartSeries['termBands'][number];
 
 export function calculateScheduledPayment(
   balance: number,
@@ -50,34 +64,87 @@ export function calculateScheduledPayment(
 export function projectMortgageScenario(scenario: MortgageScenario): MortgageProjection {
   validateScenario(scenario);
 
-  const frequency = scenario.paymentFrequency;
-  const paymentsPerYear = getPaymentsPerYear(frequency);
+  const initialFrequency = scenario.paymentFrequency;
+  const paymentsPerYear = getPaymentsPerYear(initialFrequency);
   const totalScheduledPayments = getPaymentCount(scenario.amortizationMonths, paymentsPerYear);
-  const periodicRate = getPeriodicRate(scenario.initialTerm.annualInterestRate, paymentsPerYear);
-  const regularPaymentAmount = calculateScheduledPayment(
+  const initialRegularPaymentAmount = calculateScheduledPayment(
     scenario.principalAmount,
     scenario.initialTerm.annualInterestRate,
-    frequency,
+    initialFrequency,
     totalScheduledPayments
   );
 
   const schedule: PaymentScheduleRow[] = [];
   const warnings: ProjectionWarning[] = [];
+  const renewalMarkers: RenewalMarker[] = [];
+  const termBands: TermBand[] = [
+    {
+      startDate: scenario.initialTerm.startDate,
+      endDate: addMonths(scenario.initialTerm.startDate, scenario.initialTerm.termMonths),
+      label: 'Initial term',
+      rate: scenario.initialTerm.annualInterestRate
+    }
+  ];
   const lumpSums = [...scenario.lumpSums].sort((left, right) => {
     const dateComparison = compareIsoDates(left.date, right.date);
     return dateComparison === 0 ? left.id.localeCompare(right.id) : dateComparison;
   });
+  const renewals = [...scenario.renewals].sort((left, right) => {
+    const dateComparison = compareIsoDates(left.effectiveDate, right.effectiveDate);
+    return dateComparison === 0 ? left.id.localeCompare(right.id) : dateComparison;
+  });
   let nextLumpSumIndex = 0;
+  let nextRenewalIndex = 0;
   let nextSequence = 1;
   let balance = roundMoney(scenario.principalAmount);
-  let paymentDate = getFirstPaymentDate(scenario.startDate, frequency);
+  let activeTerm: ActiveTerm = {
+    id: scenario.initialTerm.id,
+    startDate: scenario.initialTerm.startDate,
+    termMonths: scenario.initialTerm.termMonths,
+    annualInterestRate: scenario.initialTerm.annualInterestRate,
+    paymentFrequency: initialFrequency,
+    paymentStrategy: scenario.initialTerm.paymentStrategy
+  };
+  let regularPaymentAmount = initialRegularPaymentAmount;
+  let plannedPaymentsRemaining = totalScheduledPayments;
+  let paymentDate = getFirstPaymentDate(scenario.startDate, activeTerm.paymentFrequency);
+  let pendingRenewalNotes: string[] = [];
 
-  for (let index = 0; balance > 0 && index < totalScheduledPayments; index += 1) {
+  scheduleLoop: while (balance > 0 && schedule.length < MAX_SCHEDULE_ROWS) {
     while (
       balance > 0 &&
-      nextLumpSumIndex < lumpSums.length &&
-      compareIsoDates(lumpSums[nextLumpSumIndex].date, paymentDate) < 0
+      schedule.length < MAX_SCHEDULE_ROWS &&
+      hasEventBeforePayment(renewals, nextRenewalIndex, lumpSums, nextLumpSumIndex, paymentDate)
     ) {
+      const nextRenewal = renewals[nextRenewalIndex];
+      const nextLumpSum = lumpSums[nextLumpSumIndex];
+
+      if (
+        nextRenewal &&
+        compareIsoDates(nextRenewal.effectiveDate, paymentDate) < 0 &&
+        (!nextLumpSum || compareIsoDates(nextRenewal.effectiveDate, nextLumpSum.date) <= 0)
+      ) {
+        const renewalResult = applyRenewal({
+          renewal: nextRenewal,
+          balance,
+          activeTerm,
+          regularPaymentAmount,
+          renewalMarkers,
+          termBands
+        });
+
+        nextRenewalIndex += 1;
+        activeTerm = renewalResult.activeTerm;
+        regularPaymentAmount = renewalResult.regularPaymentAmount;
+        plannedPaymentsRemaining = renewalResult.plannedPaymentsRemaining;
+        pendingRenewalNotes = [...pendingRenewalNotes, ...renewalResult.notes];
+        paymentDate = getFirstPaymentDate(
+          nextRenewal.effectiveDate,
+          renewalResult.activeTerm.paymentFrequency
+        );
+        continue;
+      }
+
       const lumpSumDate = lumpSums[nextLumpSumIndex].date;
       const appliedLumpSums = applyLumpSumsForDate(
         lumpSums,
@@ -94,7 +161,7 @@ export function projectMortgageScenario(scenario: MortgageScenario): MortgagePro
         schedule.push({
           sequence: nextSequence,
           date: lumpSumDate,
-          periodId: scenario.initialTerm.id,
+          periodId: activeTerm.id,
           openingBalance: appliedLumpSums.openingBalance,
           scheduledPayment: 0,
           scheduledInterestPaid: 0,
@@ -103,8 +170,8 @@ export function projectMortgageScenario(scenario: MortgageScenario): MortgagePro
           totalPayment: appliedLumpSums.appliedAmount,
           totalPrincipalReduction: appliedLumpSums.appliedAmount,
           closingBalance: appliedLumpSums.closingBalance,
-          annualInterestRate: scenario.initialTerm.annualInterestRate,
-          paymentFrequency: frequency,
+          annualInterestRate: activeTerm.annualInterestRate,
+          paymentFrequency: activeTerm.paymentFrequency,
           eventType: appliedLumpSums.closingBalance === 0 ? 'final-payment' : 'lump-sum',
           notes:
             appliedLumpSums.closingBalance === 0
@@ -119,6 +186,32 @@ export function projectMortgageScenario(scenario: MortgageScenario): MortgagePro
       break;
     }
 
+    while (
+      nextRenewalIndex < renewals.length &&
+      compareIsoDates(renewals[nextRenewalIndex].effectiveDate, paymentDate) <= 0
+    ) {
+      const renewal = renewals[nextRenewalIndex];
+      const renewalResult = applyRenewal({
+        renewal,
+        balance,
+        activeTerm,
+        regularPaymentAmount,
+        renewalMarkers,
+        termBands
+      });
+
+      nextRenewalIndex += 1;
+      activeTerm = renewalResult.activeTerm;
+      regularPaymentAmount = renewalResult.regularPaymentAmount;
+      plannedPaymentsRemaining = renewalResult.plannedPaymentsRemaining;
+      pendingRenewalNotes = [...pendingRenewalNotes, ...renewalResult.notes];
+      paymentDate = getFirstPaymentDate(renewal.effectiveDate, activeTerm.paymentFrequency);
+
+      if (compareIsoDates(renewal.effectiveDate, paymentDate) < 0) {
+        continue scheduleLoop;
+      }
+    }
+
     const openingBalance = roundMoney(balance);
     const sameDateLumpSums = applyLumpSumsForDate(
       lumpSums,
@@ -130,9 +223,13 @@ export function projectMortgageScenario(scenario: MortgageScenario): MortgagePro
     nextLumpSumIndex = sameDateLumpSums.nextIndex;
 
     const balanceAfterLumpSums = sameDateLumpSums.closingBalance;
+    const periodicRate = getPeriodicRate(
+      activeTerm.annualInterestRate,
+      getPaymentsPerYear(activeTerm.paymentFrequency)
+    );
     const scheduledInterestPaid = roundMoney(balanceAfterLumpSums * periodicRate);
     const regularPrincipalPaid = Math.max(0, regularPaymentAmount - scheduledInterestPaid);
-    const isLastScheduledPayment = index === totalScheduledPayments - 1;
+    const isLastScheduledPayment = plannedPaymentsRemaining <= 1;
     const scheduledPrincipalPaid = roundMoney(
       balanceAfterLumpSums === 0
         ? 0
@@ -143,7 +240,9 @@ export function projectMortgageScenario(scenario: MortgageScenario): MortgagePro
     const scheduledPayment = roundMoney(scheduledInterestPaid + scheduledPrincipalPaid);
     const closingBalance = clampCentLevelBalance(balanceAfterLumpSums - scheduledPrincipalPaid);
     const isFinalPayment = closingBalance === 0;
-    const notes = [...sameDateLumpSums.notes];
+    const notes = [...pendingRenewalNotes, ...sameDateLumpSums.notes];
+    const isRenewalRow = pendingRenewalNotes.length > 0;
+    pendingRenewalNotes = [];
 
     if (isFinalPayment) {
       notes.push('Mortgage paid off');
@@ -152,7 +251,7 @@ export function projectMortgageScenario(scenario: MortgageScenario): MortgagePro
     schedule.push({
       sequence: nextSequence,
       date: paymentDate,
-      periodId: scenario.initialTerm.id,
+      periodId: activeTerm.id,
       openingBalance,
       scheduledPayment,
       scheduledInterestPaid,
@@ -161,10 +260,12 @@ export function projectMortgageScenario(scenario: MortgageScenario): MortgagePro
       totalPayment: roundMoney(scheduledPayment + sameDateLumpSums.appliedAmount),
       totalPrincipalReduction: roundMoney(scheduledPrincipalPaid + sameDateLumpSums.appliedAmount),
       closingBalance,
-      annualInterestRate: scenario.initialTerm.annualInterestRate,
-      paymentFrequency: frequency,
+      annualInterestRate: activeTerm.annualInterestRate,
+      paymentFrequency: activeTerm.paymentFrequency,
       eventType: isFinalPayment
         ? 'final-payment'
+        : isRenewalRow
+          ? 'renewal'
         : sameDateLumpSums.appliedAmount > 0
           ? 'lump-sum'
           : 'regular-payment',
@@ -173,15 +274,17 @@ export function projectMortgageScenario(scenario: MortgageScenario): MortgagePro
     nextSequence += 1;
 
     balance = closingBalance;
+    plannedPaymentsRemaining = Math.max(0, plannedPaymentsRemaining - 1);
 
     if (balance > 0) {
-      paymentDate = getNextPaymentDate(paymentDate, frequency);
+      paymentDate = getNextPaymentDate(paymentDate, activeTerm.paymentFrequency);
     }
   }
 
-  const summary = createProjectionSummary(scenario, regularPaymentAmount, schedule);
-  const chartSeries = createChartSeries(scenario, schedule);
+  const summary = createProjectionSummary(scenario, initialRegularPaymentAmount, schedule);
+  const chartSeries = createChartSeries(schedule, renewalMarkers, termBands);
   appendIgnoredLumpSumWarnings(lumpSums.slice(nextLumpSumIndex), warnings);
+  appendIgnoredRenewalWarnings(renewals.slice(nextRenewalIndex), warnings);
 
   return {
     scenarioId: scenario.id,
@@ -191,6 +294,137 @@ export function projectMortgageScenario(scenario: MortgageScenario): MortgagePro
     chartSeries,
     warnings
   };
+}
+
+function hasEventBeforePayment(
+  renewals: RenewalEvent[],
+  nextRenewalIndex: number,
+  lumpSums: LumpSumEvent[],
+  nextLumpSumIndex: number,
+  paymentDate: string
+): boolean {
+  return (
+    (nextRenewalIndex < renewals.length &&
+      compareIsoDates(renewals[nextRenewalIndex].effectiveDate, paymentDate) < 0) ||
+    (nextLumpSumIndex < lumpSums.length &&
+      compareIsoDates(lumpSums[nextLumpSumIndex].date, paymentDate) < 0)
+  );
+}
+
+function applyRenewal({
+  renewal,
+  balance,
+  activeTerm,
+  regularPaymentAmount,
+  renewalMarkers,
+  termBands
+}: {
+  renewal: RenewalEvent;
+  balance: number;
+  activeTerm: ActiveTerm;
+  regularPaymentAmount: number;
+  renewalMarkers: RenewalMarker[];
+  termBands: TermBand[];
+}): {
+  activeTerm: ActiveTerm;
+  regularPaymentAmount: number;
+  plannedPaymentsRemaining: number;
+  notes: string[];
+} {
+  const paymentFrequency = renewal.paymentFrequency ?? activeTerm.paymentFrequency;
+  const plannedPaymentsRemaining = getRenewalPaymentCount(
+    balance,
+    regularPaymentAmount,
+    activeTerm.annualInterestRate,
+    activeTerm.paymentFrequency,
+    paymentFrequency
+  );
+  const nextRegularPaymentAmount =
+    renewal.paymentStrategy === 'keep-payment-reduce-time'
+      ? regularPaymentAmount
+      : calculateScheduledPayment(
+          balance,
+          renewal.annualInterestRate,
+          paymentFrequency,
+          plannedPaymentsRemaining
+        );
+  const nextTerm: ActiveTerm = {
+    id: renewal.id,
+    startDate: renewal.effectiveDate,
+    termMonths: renewal.termMonths,
+    annualInterestRate: renewal.annualInterestRate,
+    paymentFrequency,
+    paymentStrategy: renewal.paymentStrategy
+  };
+  const markerLabel = `Renewal ${renewalMarkers.length + 1}`;
+
+  renewalMarkers.push({
+    date: renewal.effectiveDate,
+    label: markerLabel,
+    rate: renewal.annualInterestRate,
+    termMonths: renewal.termMonths
+  });
+  termBands.push({
+    startDate: renewal.effectiveDate,
+    endDate: addMonths(renewal.effectiveDate, renewal.termMonths),
+    label: markerLabel,
+    rate: renewal.annualInterestRate
+  });
+
+  return {
+    activeTerm: nextTerm,
+    regularPaymentAmount: nextRegularPaymentAmount,
+    plannedPaymentsRemaining,
+    notes: [
+      `${markerLabel} applied`,
+      ...(renewal.note?.trim() ? [renewal.note.trim()] : [])
+    ]
+  };
+}
+
+function getRenewalPaymentCount(
+  balance: number,
+  scheduledPayment: number,
+  annualInterestRate: number,
+  currentFrequency: PaymentFrequency,
+  nextFrequency: PaymentFrequency
+): number {
+  const currentRemainingPayments = estimateRemainingPaymentCount(
+    balance,
+    scheduledPayment,
+    annualInterestRate,
+    currentFrequency
+  );
+  const remainingYears = currentRemainingPayments / getPaymentsPerYear(currentFrequency);
+
+  return Math.max(1, Math.ceil(remainingYears * getPaymentsPerYear(nextFrequency)));
+}
+
+function estimateRemainingPaymentCount(
+  balance: number,
+  scheduledPayment: number,
+  annualInterestRate: number,
+  paymentFrequency: PaymentFrequency
+): number {
+  let currentBalance = roundMoney(balance);
+  const periodicRate = getPeriodicRate(annualInterestRate, getPaymentsPerYear(paymentFrequency));
+
+  for (let paymentCount = 1; paymentCount <= MAX_SCHEDULE_ROWS; paymentCount += 1) {
+    const interestPaid = roundMoney(currentBalance * periodicRate);
+    const principalPaid = roundMoney(Math.min(currentBalance, scheduledPayment - interestPaid));
+
+    if (principalPaid <= 0) {
+      return MAX_SCHEDULE_ROWS;
+    }
+
+    currentBalance = clampCentLevelBalance(currentBalance - principalPaid);
+
+    if (currentBalance === 0) {
+      return paymentCount;
+    }
+  }
+
+  return MAX_SCHEDULE_ROWS;
 }
 
 function applyLumpSumsForDate(
@@ -262,8 +496,27 @@ function createIgnoredLumpSumWarning(lumpSum: LumpSumEvent): ProjectionWarning {
   };
 }
 
+function appendIgnoredRenewalWarnings(
+  renewals: RenewalEvent[],
+  warnings: ProjectionWarning[]
+): void {
+  for (const renewal of renewals) {
+    warnings.push({
+      code: 'renewal-after-payoff',
+      message: `${describeRenewal(renewal)} was ignored because the mortgage is already paid off.`,
+      severity: 'warning',
+      date: renewal.effectiveDate,
+      eventId: renewal.id
+    });
+  }
+}
+
 function describeLumpSum(lumpSum: LumpSumEvent): string {
   return lumpSum.label?.trim() ? `Lump sum "${lumpSum.label.trim()}"` : 'Lump sum payment';
+}
+
+function describeRenewal(renewal: RenewalEvent): string {
+  return renewal.note?.trim() ? `Renewal "${renewal.note.trim()}"` : 'Renewal event';
 }
 
 function createProjectionSummary(
@@ -297,8 +550,9 @@ function createProjectionSummary(
 }
 
 function createChartSeries(
-  scenario: MortgageScenario,
-  schedule: PaymentScheduleRow[]
+  schedule: PaymentScheduleRow[],
+  renewalMarkers: RenewalMarker[],
+  termBands: TermBand[]
 ): ProjectionChartSeries {
   return {
     balanceOverTime: schedule.map((row) => ({
@@ -314,15 +568,8 @@ function createChartSeries(
       totalPrincipalReduction: row.totalPrincipalReduction,
       periodId: row.periodId
     })),
-    renewalMarkers: [],
-    termBands: [
-      {
-        startDate: scenario.initialTerm.startDate,
-        endDate: addMonths(scenario.initialTerm.startDate, scenario.initialTerm.termMonths),
-        label: 'Initial term',
-        rate: scenario.initialTerm.annualInterestRate
-      }
-    ]
+    renewalMarkers,
+    termBands
   };
 }
 
@@ -363,6 +610,19 @@ function validateScenario(scenario: MortgageScenario): void {
 
     if (compareIsoDates(lumpSum.date, scenario.startDate) < 0) {
       throw new Error('Lump-sum date must be on or after the mortgage start date.');
+    }
+  }
+
+  for (const renewal of scenario.renewals) {
+    compareIsoDates(renewal.effectiveDate, scenario.startDate);
+    assertNonNegativeFinite(renewal.annualInterestRate, 'Renewal annual interest rate');
+
+    if (!Number.isInteger(renewal.termMonths) || renewal.termMonths <= 0) {
+      throw new Error('Renewal term months must be a positive integer.');
+    }
+
+    if (compareIsoDates(renewal.effectiveDate, scenario.startDate) < 0) {
+      throw new Error('Renewal date must be on or after the mortgage start date.');
     }
   }
 }

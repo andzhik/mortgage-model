@@ -92,4 +92,42 @@ describe('App projection wiring', () => {
       wrapper.unmount();
     }
   });
+
+  it('adds, edits, and deletes renewal events from the live projection', async () => {
+    const [{ mount }, { default: AppShell }] = await Promise.all([
+      import('@vue/test-utils'),
+      import('../src/app/AppShell')
+    ]);
+    const wrapper = mount(AppShell);
+
+    try {
+      expect(wrapper.text()).toContain('No renewal events yet.');
+
+      const addButton = wrapper
+        .findAll('button')
+        .find((button) => button.text() === 'Add renewal');
+
+      expect(addButton).toBeTruthy();
+      await addButton?.trigger('click');
+
+      expect(wrapper.get('input[aria-label="Renewal annual interest rate 1"]').element).toBeTruthy();
+      expect(wrapper.text()).toContain('Renewal 1 applied');
+
+      await wrapper.get('input[aria-label="Renewal effective date 1"]').setValue('2031-01-10');
+      await wrapper.get('input[aria-label="Renewal annual interest rate 1"]').setValue('4.25');
+      await wrapper.get('select[aria-label="Renewal payment frequency 1"]').setValue('bi-weekly');
+      await wrapper.get('input[aria-label="Renewal note 1"]').setValue('Rate reset');
+
+      expect(wrapper.text()).toContain('Rate reset');
+      expect(wrapper.text()).toContain('renewal-');
+      expect(wrapper.text()).toContain('4.25%');
+
+      await wrapper.get('button[aria-label="Delete renewal 1"]').trigger('click');
+
+      expect(wrapper.find('input[aria-label="Renewal annual interest rate 1"]').exists()).toBe(false);
+      expect(wrapper.text()).toContain('No renewal events yet.');
+    } finally {
+      wrapper.unmount();
+    }
+  });
 });

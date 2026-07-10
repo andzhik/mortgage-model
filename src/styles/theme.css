@@ -274,6 +274,7 @@
 }
 
 .event-row label:nth-child(3),
+.event-row-wide,
 .event-delete-button {
   grid-column: 1 / -1;
 }

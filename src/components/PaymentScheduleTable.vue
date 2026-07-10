@@ -53,6 +53,7 @@ const columns = [
     header: 'Rate',
     cell: (info) => formatPercent(info.getValue())
   }),
+  columnHelper.accessor('periodId', { header: 'Term' }),
   columnHelper.accessor((row) => row.notes?.join(', ') ?? row.eventType ?? '', {
     id: 'eventNotes',
     header: 'Event notes'

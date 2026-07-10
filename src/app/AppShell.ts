@@ -12,10 +12,12 @@ import type {
   MortgageProjection,
   MortgageScenario,
   PaymentFrequency,
+  PaymentStrategy,
   PaymentScheduleRow,
   ProjectionChartSeries,
   ProjectionWarning,
-  ProjectionSummary
+  ProjectionSummary,
+  RenewalEvent
 } from '../domain/mortgageTypes';
 import { PAYMENT_FREQUENCY_METADATA } from '../domain/paymentFrequency';
 
@@ -34,8 +36,18 @@ export type LumpSumInputUpdate = Partial<{
   label: string;
 }>;
 
+export type RenewalInputUpdate = Partial<{
+  effectiveDate: string;
+  termMonths: number;
+  annualInterestRate: number;
+  paymentFrequency: PaymentFrequency;
+  paymentStrategy: PaymentStrategy;
+  note: string;
+}>;
+
 const today = new Date().toISOString().slice(0, 10);
 let nextLumpSumId = 1;
+let nextRenewalId = 1;
 
 function makeDefaultScenario(): MortgageScenario {
   return {
@@ -262,6 +274,7 @@ const scheduleColumns = [
     header: 'Rate',
     cell: (info) => formatPercent(info.getValue())
   }),
+  columnHelper.accessor('periodId', { header: 'Term' }),
   columnHelper.accessor((row) => row.notes?.join(', ') ?? row.eventType ?? '', {
     id: 'eventNotes',
     header: 'Event notes'
@@ -534,20 +547,168 @@ const MortgageInputs = defineComponent({
   }
 });
 
-function panelHeading(title: string, action?: string) {
-  return h('div', { class: 'panel-heading' }, [
-    h('h2', title),
-    action ? h('button', { type: 'button' }, action) : null
-  ]);
-}
-
 const RenewalEditorShell = defineComponent({
   name: 'RenewalEditorShell',
-  setup() {
+  props: {
+    scenario: {
+      type: Object as () => MortgageScenario,
+      required: true
+    }
+  },
+  emits: {
+    addRenewal: () => true,
+    updateRenewal: (_id: string, _update: RenewalInputUpdate) => true,
+    deleteRenewal: (_id: string) => true
+  },
+  setup(props, { emit }) {
+    const frequencies = Object.values(PAYMENT_FREQUENCY_METADATA);
+    const paymentStrategies: { strategy: PaymentStrategy; label: string }[] = [
+      { strategy: 'recalculate-payment', label: 'Recalculate payment' },
+      { strategy: 'keep-payment-reduce-time', label: 'Keep payment, reduce time' }
+    ];
+
+    function toNumber(event: Event): number {
+      const value = Number((event.target as HTMLInputElement).value);
+      return Number.isFinite(value) ? value : 0;
+    }
+
+    function toText(event: Event): string {
+      return (event.target as HTMLInputElement).value;
+    }
+
+    function updateTerm(renewal: RenewalEvent, years: number, months: number): void {
+      emit('updateRenewal', renewal.id, {
+        termMonths: Math.max(1, years * 12 + months)
+      });
+    }
+
     return () =>
       h('section', { class: 'panel editor-section', 'aria-labelledby': 'renewal-editor-heading' }, [
-        panelHeading('Renewals', 'Add renewal'),
-        h('div', { class: 'compact-empty-state' }, 'No renewal events yet.')
+        h('div', { class: 'panel-heading' }, [
+          h('h2', { id: 'renewal-editor-heading' }, 'Renewals'),
+          h('button', { type: 'button', onClick: () => emit('addRenewal') }, 'Add renewal')
+        ]),
+        props.scenario.renewals.length === 0
+          ? h('div', { class: 'compact-empty-state' }, 'No renewal events yet.')
+          : h(
+              'div',
+              { class: 'event-list' },
+              props.scenario.renewals.map((renewal, index) => {
+                const termYears = Math.floor(renewal.termMonths / 12);
+                const termExtraMonths = renewal.termMonths % 12;
+
+                return h('div', { class: 'event-row renewal-row', key: renewal.id }, [
+                  h('label', [
+                    'Effective date',
+                    h('input', {
+                      'aria-label': `Renewal effective date ${index + 1}`,
+                      type: 'date',
+                      value: renewal.effectiveDate,
+                      min: props.scenario.startDate,
+                      onInput: (event: Event) =>
+                        emit('updateRenewal', renewal.id, { effectiveDate: toText(event) })
+                    })
+                  ]),
+                  h('label', [
+                    'Annual interest rate',
+                    h('input', {
+                      'aria-label': `Renewal annual interest rate ${index + 1}`,
+                      type: 'number',
+                      value: renewal.annualInterestRate * 100,
+                      min: '0',
+                      step: '0.01',
+                      onInput: (event: Event) =>
+                        emit('updateRenewal', renewal.id, {
+                          annualInterestRate: Math.max(0, toNumber(event)) / 100
+                        })
+                    })
+                  ]),
+                  h('label', [
+                    'Term years',
+                    h('input', {
+                      'aria-label': `Renewal term years ${index + 1}`,
+                      type: 'number',
+                      value: termYears,
+                      min: '0',
+                      step: '1',
+                      onInput: (event: Event) =>
+                        updateTerm(renewal, Math.max(0, toNumber(event)), termExtraMonths)
+                    })
+                  ]),
+                  h('label', [
+                    'Term months',
+                    h('input', {
+                      'aria-label': `Renewal term months ${index + 1}`,
+                      type: 'number',
+                      value: termExtraMonths,
+                      min: '0',
+                      max: '11',
+                      step: '1',
+                      onInput: (event: Event) =>
+                        updateTerm(renewal, termYears, Math.min(11, Math.max(0, toNumber(event))))
+                    })
+                  ]),
+                  h('label', [
+                    'Payment frequency',
+                    h(
+                      'select',
+                      {
+                        'aria-label': `Renewal payment frequency ${index + 1}`,
+                        value: renewal.paymentFrequency ?? props.scenario.paymentFrequency,
+                        onChange: (event: Event) =>
+                          emit('updateRenewal', renewal.id, {
+                            paymentFrequency: toText(event) as PaymentFrequency
+                          })
+                      },
+                      frequencies.map((frequency) =>
+                        h(
+                          'option',
+                          { key: frequency.frequency, value: frequency.frequency },
+                          frequency.label
+                        )
+                      )
+                    )
+                  ]),
+                  h('label', [
+                    'Payment strategy',
+                    h(
+                      'select',
+                      {
+                        'aria-label': `Renewal payment strategy ${index + 1}`,
+                        value: renewal.paymentStrategy,
+                        onChange: (event: Event) =>
+                          emit('updateRenewal', renewal.id, {
+                            paymentStrategy: toText(event) as PaymentStrategy
+                          })
+                      },
+                      paymentStrategies.map((strategy) =>
+                        h('option', { key: strategy.strategy, value: strategy.strategy }, strategy.label)
+                      )
+                    )
+                  ]),
+                  h('label', { class: 'event-row-wide' }, [
+                    'Note',
+                    h('input', {
+                      'aria-label': `Renewal note ${index + 1}`,
+                      type: 'text',
+                      value: renewal.note ?? '',
+                      onInput: (event: Event) =>
+                        emit('updateRenewal', renewal.id, { note: toText(event) })
+                    })
+                  ]),
+                  h(
+                    'button',
+                    {
+                      type: 'button',
+                      class: 'danger-button event-delete-button',
+                      'aria-label': `Delete renewal ${index + 1}`,
+                      onClick: () => emit('deleteRenewal', renewal.id)
+                    },
+                    'Delete'
+                  )
+                ]);
+              })
+            )
       ]);
   }
 });
@@ -657,6 +818,10 @@ export default defineComponent({
           ...lumpSum,
           date: lumpSum.date < startDate ? startDate : lumpSum.date
         }));
+        scenario.renewals = scenario.renewals.map((renewal) => ({
+          ...renewal,
+          effectiveDate: renewal.effectiveDate < startDate ? startDate : renewal.effectiveDate
+        }));
       }
 
       if (update.amortizationMonths !== undefined) {
@@ -722,6 +887,63 @@ export default defineComponent({
       touchScenario();
     }
 
+    function addRenewal(): void {
+      scenario.renewals.push({
+        id: `renewal-${Date.now()}-${nextRenewalId}`,
+        effectiveDate: scenario.startDate,
+        termMonths: scenario.initialTerm.termMonths,
+        annualInterestRate: scenario.initialTerm.annualInterestRate,
+        paymentFrequency: scenario.paymentFrequency,
+        paymentStrategy: 'recalculate-payment',
+        note: undefined
+      });
+      nextRenewalId += 1;
+      touchScenario();
+    }
+
+    function updateRenewal(id: string, update: RenewalInputUpdate): void {
+      const renewal = scenario.renewals.find((candidate) => candidate.id === id);
+
+      if (!renewal) {
+        return;
+      }
+
+      if (update.effectiveDate !== undefined && update.effectiveDate) {
+        renewal.effectiveDate =
+          update.effectiveDate < scenario.startDate ? scenario.startDate : update.effectiveDate;
+      }
+
+      if (update.termMonths !== undefined) {
+        renewal.termMonths = Math.max(1, update.termMonths);
+      }
+
+      if (update.annualInterestRate !== undefined) {
+        renewal.annualInterestRate = Math.max(0, update.annualInterestRate);
+      }
+
+      if (update.paymentFrequency !== undefined) {
+        renewal.paymentFrequency = update.paymentFrequency;
+      }
+
+      if (update.paymentStrategy !== undefined) {
+        renewal.paymentStrategy = update.paymentStrategy;
+      }
+
+      if (update.note !== undefined) {
+        const note = update.note.trim();
+        renewal.note = note.length > 0 ? note : undefined;
+      }
+
+      touchScenario();
+    }
+
+    function deleteRenewal(id: string): void {
+      scenario.renewals = scenario.renewals.filter(
+        (renewal: RenewalEvent) => renewal.id !== id
+      );
+      touchScenario();
+    }
+
     return () =>
       h('div', { class: 'app-shell' }, [
         h(ScenarioBar, { scenarioName: scenario.name }),
@@ -746,7 +968,12 @@ export default defineComponent({
               scenario,
               onUpdateScenario: updateScenario
             }),
-            h(RenewalEditorShell),
+            h(RenewalEditorShell, {
+              scenario,
+              onAddRenewal: addRenewal,
+              onUpdateRenewal: updateRenewal,
+              onDeleteRenewal: deleteRenewal
+            }),
             h(LumpSumEditorShell, {
               scenario,
               onAddLumpSum: addLumpSum,

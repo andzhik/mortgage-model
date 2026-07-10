@@ -6,7 +6,12 @@ import {
 import { compareIsoDates } from '../src/domain/dateMath';
 import { getPeriodicRate } from '../src/domain/interestRates';
 import { roundMoney } from '../src/domain/money';
-import type { LumpSumEvent, MortgageScenario, PaymentFrequency } from '../src/domain/mortgageTypes';
+import type {
+  LumpSumEvent,
+  MortgageScenario,
+  PaymentFrequency,
+  RenewalEvent
+} from '../src/domain/mortgageTypes';
 
 describe('mortgage calculator', () => {
   it('projects a monthly Canadian mortgage with payment split, summary, and chart series', () => {
@@ -365,6 +370,180 @@ describe('mortgage calculator', () => {
     expect(compareIsoDates(withLumpSum.summary.finalPaymentDate, baseline.summary.finalPaymentDate)).toBeLessThan(0);
     expect(withLumpSum.summary.totalLumpSumsPaid).toBe(25_000);
   });
+
+  it('marks the first payment row in a renewed term', () => {
+    const projection = projectMortgageScenario(
+      makeScenario({
+        principalAmount: 100_000,
+        annualInterestRate: 0.04,
+        amortizationMonths: 120,
+        paymentFrequency: 'monthly',
+        termMonths: 12,
+        renewals: [
+          {
+            id: 'renewal-year-2',
+            effectiveDate: '2027-01-10',
+            termMonths: 24,
+            annualInterestRate: 0.04,
+            paymentFrequency: 'monthly',
+            paymentStrategy: 'recalculate-payment',
+            note: 'Second term'
+          }
+        ]
+      })
+    );
+    const renewalRow = projection.schedule.find((row) => row.date === '2027-01-10');
+
+    expect(renewalRow).toMatchObject({
+      periodId: 'renewal-year-2',
+      eventType: 'renewal',
+      annualInterestRate: 0.04,
+      notes: ['Renewal 1 applied', 'Second term']
+    });
+    expect(projection.chartSeries.renewalMarkers).toEqual([
+      {
+        date: '2027-01-10',
+        label: 'Renewal 1',
+        rate: 0.04,
+        termMonths: 24
+      }
+    ]);
+  });
+
+  it('recalculates payment when a renewal changes the rate', () => {
+    const projection = projectMortgageScenario(
+      makeScenario({
+        principalAmount: 100_000,
+        annualInterestRate: 0.03,
+        amortizationMonths: 120,
+        paymentFrequency: 'monthly',
+        termMonths: 12,
+        renewals: [
+          {
+            id: 'renewal-higher-rate',
+            effectiveDate: '2027-01-10',
+            termMonths: 24,
+            annualInterestRate: 0.08,
+            paymentFrequency: 'monthly',
+            paymentStrategy: 'recalculate-payment'
+          }
+        ]
+      })
+    );
+    const preRenewalRow = projection.schedule.find((row) => row.date === '2026-12-10');
+    const renewalRow = projection.schedule.find((row) => row.date === '2027-01-10');
+
+    expect(preRenewalRow?.scheduledPayment).toBe(964.75);
+    expect(renewalRow?.scheduledPayment).toBeGreaterThan(preRenewalRow?.scheduledPayment ?? 0);
+    expect(renewalRow).toMatchObject({
+      periodId: 'renewal-higher-rate',
+      annualInterestRate: 0.08,
+      eventType: 'renewal'
+    });
+  });
+
+  it('assigns period IDs before and after renewal events', () => {
+    const projection = projectMortgageScenario(
+      makeScenario({
+        principalAmount: 80_000,
+        annualInterestRate: 0.04,
+        amortizationMonths: 120,
+        paymentFrequency: 'monthly',
+        termMonths: 12,
+        renewals: [
+          {
+            id: 'renewal-term-2',
+            effectiveDate: '2027-01-10',
+            termMonths: 36,
+            annualInterestRate: 0.045,
+            paymentFrequency: 'bi-weekly',
+            paymentStrategy: 'recalculate-payment'
+          }
+        ]
+      })
+    );
+    const initialRows = projection.schedule.filter((row) => row.date < '2027-01-10');
+    const renewedRows = projection.schedule.filter((row) => row.date >= '2027-01-10');
+
+    expect(new Set(initialRows.map((row) => row.periodId))).toEqual(new Set(['term-initial']));
+    expect(new Set(renewedRows.map((row) => row.periodId))).toEqual(
+      new Set(['renewal-term-2'])
+    );
+    expect(renewedRows[0]).toMatchObject({
+      date: '2027-01-10',
+      paymentFrequency: 'bi-weekly',
+      eventType: 'renewal'
+    });
+  });
+
+  it('warns and ignores renewal events after payoff', () => {
+    const projection = projectMortgageScenario(
+      makeScenario({
+        principalAmount: 12_000,
+        annualInterestRate: 0,
+        amortizationMonths: 12,
+        paymentFrequency: 'monthly',
+        renewals: [
+          {
+            id: 'renewal-too-late',
+            effectiveDate: '2027-02-10',
+            termMonths: 12,
+            annualInterestRate: 0.05,
+            paymentFrequency: 'monthly',
+            paymentStrategy: 'recalculate-payment'
+          }
+        ]
+      })
+    );
+
+    expect(projection.summary.finalPaymentDate).toBe('2026-12-10');
+    expect(projection.chartSeries.renewalMarkers).toEqual([]);
+    expect(projection.warnings).toMatchObject([
+      {
+        code: 'renewal-after-payoff',
+        eventId: 'renewal-too-late',
+        date: '2027-02-10',
+        severity: 'warning'
+      }
+    ]);
+  });
+
+  it('preserves lump-sum-shortened payoff when payment is recalculated at renewal', () => {
+    const renewal: RenewalEvent = {
+      id: 'renewal-after-lump-sum',
+      effectiveDate: '2031-01-10',
+      termMonths: 60,
+      annualInterestRate: 0.045,
+      paymentFrequency: 'monthly',
+      paymentStrategy: 'recalculate-payment'
+    };
+    const baseline = projectMortgageScenario(
+      makeScenario({
+        principalAmount: 250_000,
+        annualInterestRate: 0.045,
+        amortizationMonths: 300,
+        paymentFrequency: 'monthly',
+        renewals: [renewal]
+      })
+    );
+    const withLumpSum = projectMortgageScenario(
+      makeScenario({
+        principalAmount: 250_000,
+        annualInterestRate: 0.045,
+        amortizationMonths: 300,
+        paymentFrequency: 'monthly',
+        lumpSums: [{ id: 'lump-early', date: '2027-01-10', amount: 25_000 }],
+        renewals: [renewal]
+      })
+    );
+
+    expect(compareIsoDates(withLumpSum.summary.finalPaymentDate, baseline.summary.finalPaymentDate)).toBeLessThan(0);
+    expect(withLumpSum.summary.totalLumpSumsPaid).toBe(25_000);
+    expect(withLumpSum.schedule.find((row) => row.date === '2031-01-10')).toMatchObject({
+      periodId: 'renewal-after-lump-sum',
+      eventType: 'renewal'
+    });
+  });
 });
 
 type ScenarioOverrides = {
@@ -373,7 +552,9 @@ type ScenarioOverrides = {
   annualInterestRate: number;
   amortizationMonths: number;
   paymentFrequency: PaymentFrequency;
+  termMonths?: number;
   lumpSums?: LumpSumEvent[];
+  renewals?: RenewalEvent[];
 };
 
 function makeScenario(overrides: ScenarioOverrides): MortgageScenario {
@@ -393,12 +574,12 @@ function makeScenario(overrides: ScenarioOverrides): MortgageScenario {
     initialTerm: {
       id: 'term-initial',
       startDate,
-      termMonths: 60,
+      termMonths: overrides.termMonths ?? 60,
       annualInterestRate: overrides.annualInterestRate,
       paymentFrequency,
       paymentStrategy: 'recalculate-payment'
     },
     lumpSums: overrides.lumpSums ?? [],
-    renewals: []
+    renewals: overrides.renewals ?? []
   };
 }
