@@ -1,0 +1,55 @@
+import { JSDOM } from 'jsdom';
+import { describe, expect, it } from 'vitest';
+
+if (typeof document === 'undefined') {
+  const dom = new JSDOM('<!doctype html><html><body></body></html>');
+
+  globalThis.window = dom.window as unknown as Window & typeof globalThis;
+  globalThis.document = dom.window.document;
+  globalThis.navigator = dom.window.navigator;
+  globalThis.Element = dom.window.Element;
+  globalThis.HTMLElement = dom.window.HTMLElement;
+  globalThis.Node = dom.window.Node;
+  globalThis.SVGElement = dom.window.SVGElement;
+}
+
+describe('App projection wiring', () => {
+  it('updates projection summary when core mortgage inputs change', async () => {
+    const [{ mount }, { default: AppShell }] = await Promise.all([
+      import('@vue/test-utils'),
+      import('../src/app/AppShell')
+    ]);
+    const wrapper = mount(AppShell);
+
+    try {
+      expect(wrapper.text()).toContain('$2,908.02');
+      expect(wrapper.text()).toContain('$2,061.96');
+      expect(wrapper.text()).toContain('$846.06');
+
+      await wrapper.get('input[aria-label="Start date"]').setValue('');
+
+      expect(wrapper.text()).toContain('$2,908.02');
+
+      await wrapper.get('input[aria-label="Mortgage amount"]').setValue('250000');
+
+      expect(wrapper.text()).toContain('$1,454.01');
+      expect(wrapper.text()).toContain('$1,030.98');
+      expect(wrapper.text()).toContain('$423.03');
+
+      await wrapper.get('input[aria-label="Annual interest rate"]').setValue('4');
+
+      expect(wrapper.text()).toContain('$1,315.05');
+      expect(wrapper.text()).toContain('$826.47');
+      expect(wrapper.text()).toContain('$488.58');
+
+      await wrapper.get('select[aria-label="Payment frequency"]').setValue('weekly');
+
+      expect(wrapper.text()).toContain('$303.09');
+      expect(wrapper.text()).toContain('$190.48');
+      expect(wrapper.text()).toContain('$112.61');
+      expect(wrapper.text()).toContain('1300 rows');
+    } finally {
+      wrapper.unmount();
+    }
+  });
+});

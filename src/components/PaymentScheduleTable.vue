@@ -5,37 +5,63 @@ import {
   getCoreRowModel,
   useVueTable
 } from '@tanstack/vue-table';
+import { formatMoney, formatPercent } from '../app/formatters';
+import type { PaymentScheduleRow } from '../domain/mortgageTypes';
 
-type PlaceholderPaymentRow = {
-  sequence: number;
-  date: string;
-  openingBalance: string;
-  scheduledPayment: string;
-  scheduledInterest: string;
-  scheduledPrincipal: string;
-  lumpSum: string;
-  totalPayment: string;
-  closingBalance: string;
-};
+const props = defineProps<{
+  rows: PaymentScheduleRow[];
+}>();
 
-const columnHelper = createColumnHelper<PlaceholderPaymentRow>();
-const data: PlaceholderPaymentRow[] = [];
+const columnHelper = createColumnHelper<PaymentScheduleRow>();
 
 const columns = [
   columnHelper.accessor('sequence', { header: '#' }),
   columnHelper.accessor('date', { header: 'Date' }),
-  columnHelper.accessor('openingBalance', { header: 'Opening balance' }),
-  columnHelper.accessor('scheduledPayment', { header: 'Scheduled payment' }),
-  columnHelper.accessor('scheduledInterest', { header: 'Interest' }),
-  columnHelper.accessor('scheduledPrincipal', { header: 'Principal' }),
-  columnHelper.accessor('lumpSum', { header: 'Lump sum' }),
-  columnHelper.accessor('totalPayment', { header: 'Total payment' }),
-  columnHelper.accessor('closingBalance', { header: 'Closing balance' })
+  columnHelper.accessor('openingBalance', {
+    header: 'Opening balance',
+    cell: (info) => formatMoney(info.getValue())
+  }),
+  columnHelper.accessor('scheduledPayment', {
+    header: 'Scheduled payment',
+    cell: (info) => formatMoney(info.getValue())
+  }),
+  columnHelper.accessor('scheduledInterestPaid', {
+    header: 'Interest portion',
+    cell: (info) => formatMoney(info.getValue())
+  }),
+  columnHelper.accessor('scheduledPrincipalPaid', {
+    header: 'Principal portion',
+    cell: (info) => formatMoney(info.getValue())
+  }),
+  columnHelper.accessor('lumpSumPayment', {
+    header: 'Lump sum',
+    cell: (info) => formatMoney(info.getValue())
+  }),
+  columnHelper.accessor('totalPayment', {
+    header: 'Total payment',
+    cell: (info) => formatMoney(info.getValue())
+  }),
+  columnHelper.accessor('totalPrincipalReduction', {
+    header: 'Principal reduction',
+    cell: (info) => formatMoney(info.getValue())
+  }),
+  columnHelper.accessor('closingBalance', {
+    header: 'Closing balance',
+    cell: (info) => formatMoney(info.getValue())
+  }),
+  columnHelper.accessor('annualInterestRate', {
+    header: 'Rate',
+    cell: (info) => formatPercent(info.getValue())
+  }),
+  columnHelper.accessor((row) => row.notes?.join(', ') ?? row.eventType ?? '', {
+    id: 'eventNotes',
+    header: 'Event notes'
+  })
 ];
 
 const table = useVueTable({
   get data() {
-    return data;
+    return props.rows;
   },
   columns,
   getCoreRowModel: getCoreRowModel()
@@ -46,7 +72,7 @@ const table = useVueTable({
   <section class="panel schedule-panel" aria-labelledby="schedule-heading">
     <div class="panel-heading">
       <h2 id="schedule-heading">Payment schedule</h2>
-      <span class="status-pill">Empty</span>
+      <span class="status-pill">{{ rows.length }} rows</span>
     </div>
 
     <div class="table-scroll">

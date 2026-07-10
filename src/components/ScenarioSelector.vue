@@ -1,10 +1,16 @@
+<script setup lang="ts">
+defineProps<{
+  scenarioName: string;
+}>();
+</script>
+
 <template>
   <header class="scenario-bar" aria-label="Scenario controls">
     <div>
       <p class="eyebrow">Scenario</p>
       <label class="sr-only" for="scenario-select">Current scenario</label>
       <select id="scenario-select" class="scenario-select" aria-label="Current scenario">
-        <option>Scenario 1</option>
+        <option>{{ scenarioName }}</option>
       </select>
     </div>
 
