@@ -85,7 +85,7 @@ Acceptance check:
 ## Prompt 6: Add Renewal Events
 
 ```text
-Implement manual renewal events. Users can add, edit, and delete renewal events with effective date, term length, annual interest rate, optional payment frequency if already supported by the data model, payment strategy, and note.
+Implement manual renewal events. Users can add, edit, and delete renewal events with effective date, term length, annual interest rate, payment frequency, payment strategy, and note.
 
 Projection behavior: renewals split the schedule into term segments, recalculate scheduled payment at renewal based on remaining balance, new rate, frequency, and remaining amortization, and preserve the shortened payoff behavior caused by prior lump sums. Renewal rows or first rows in a renewed term should be clearly marked in the schedule. Add projection warnings for renewals after payoff.
 

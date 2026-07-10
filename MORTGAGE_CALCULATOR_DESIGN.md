@@ -79,7 +79,7 @@ A timestamp in the payment schedule where contract conditions change, such as:
 
 - Interest rate.
 - Term length.
-- Payment frequency, if supported.
+- Payment frequency.
 - Payment amount strategy.
 - Remaining amortization basis.
 
@@ -107,6 +107,7 @@ Version 1 decisions:
 
 - `amount` means mortgage principal.
 - Renewals are manually entered by the user.
+- Renewal events can change payment frequency in version 1.
 - Semi-monthly payments occur on the 1st and 15th of each month.
 - Lump sums reduce principal, keep the regular payment unchanged until renewal, and shorten effective amortization.
 - There is no application-level limit on the number of lump-sum payments in version 1. Prepayment rules, annual maximums, and lender-specific caps are deferred.
@@ -132,11 +133,11 @@ Resolved for version 1:
 4. The generated schedule stops when the balance reaches zero, even if that is before the original amortization end date.
 5. The detailed table shows every payment row by default, with an annual summary toggle as a useful enhancement.
 6. Version 1 defaults to Canadian semi-annual compounding.
+7. Renewal events include payment frequency, so users can change frequency when renewing.
 
 Still open:
 
-1. Can users change payment frequency at renewal in the first UI, or should this remain a data-model capability for later?
-2. Should regular recurring extra payments be added after the first one-time lump-sum workflow is stable?
+1. Should regular recurring extra payments be added after the first one-time lump-sum workflow is stable?
 
 ## 8. Application Structure
 
@@ -674,7 +675,7 @@ Renewals:
 - Effective date.
 - Rate.
 - Term length.
-- Optional payment frequency.
+- Payment frequency.
 - Optional note.
 
 ### Summary Metrics
@@ -1018,5 +1019,4 @@ Defer:
 
 These choices are still open:
 
-1. Can users change payment frequency at renewal in the first UI, or should this remain a data-model capability for later?
-2. Should regular recurring extra payments be added after the one-time lump-sum workflow is stable?
+1. Should regular recurring extra payments be added after the one-time lump-sum workflow is stable?
