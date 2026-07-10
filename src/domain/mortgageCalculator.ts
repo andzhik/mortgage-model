@@ -1,17 +1,26 @@
-import { addMonths, getFirstPaymentDate, getNextPaymentDate } from './dateMath';
+import { addMonths, compareIsoDates, getFirstPaymentDate, getNextPaymentDate } from './dateMath';
 import { getPeriodicRate, getZeroInterestPayment, isZeroInterestRate } from './interestRates';
 import { clampCentLevelBalance, roundMoney } from './money';
 import type {
+  LumpSumEvent,
   MortgageProjection,
   MortgageScenario,
   PaymentFrequency,
   PaymentScheduleRow,
   ProjectionChartSeries,
-  ProjectionSummary
+  ProjectionSummary,
+  ProjectionWarning
 } from './mortgageTypes';
 import { getPaymentsPerYear } from './paymentFrequency';
 
 const MAX_SCHEDULE_ROWS = 10_000;
+
+type AppliedLumpSums = {
+  openingBalance: number;
+  closingBalance: number;
+  appliedAmount: number;
+  notes: string[];
+};
 
 export function calculateScheduledPayment(
   balance: number,
@@ -53,42 +62,115 @@ export function projectMortgageScenario(scenario: MortgageScenario): MortgagePro
   );
 
   const schedule: PaymentScheduleRow[] = [];
+  const warnings: ProjectionWarning[] = [];
+  const lumpSums = [...scenario.lumpSums].sort((left, right) => {
+    const dateComparison = compareIsoDates(left.date, right.date);
+    return dateComparison === 0 ? left.id.localeCompare(right.id) : dateComparison;
+  });
+  let nextLumpSumIndex = 0;
+  let nextSequence = 1;
   let balance = roundMoney(scenario.principalAmount);
   let paymentDate = getFirstPaymentDate(scenario.startDate, frequency);
 
-  for (
-    let index = 0;
-    balance > 0 && index < totalScheduledPayments && index < MAX_SCHEDULE_ROWS;
-    index += 1
-  ) {
+  for (let index = 0; balance > 0 && index < totalScheduledPayments; index += 1) {
+    while (
+      balance > 0 &&
+      nextLumpSumIndex < lumpSums.length &&
+      compareIsoDates(lumpSums[nextLumpSumIndex].date, paymentDate) < 0
+    ) {
+      const lumpSumDate = lumpSums[nextLumpSumIndex].date;
+      const appliedLumpSums = applyLumpSumsForDate(
+        lumpSums,
+        lumpSumDate,
+        nextLumpSumIndex,
+        balance,
+        warnings
+      );
+      nextLumpSumIndex = appliedLumpSums.nextIndex;
+
+      if (appliedLumpSums.appliedAmount > 0) {
+        balance = appliedLumpSums.closingBalance;
+
+        schedule.push({
+          sequence: nextSequence,
+          date: lumpSumDate,
+          periodId: scenario.initialTerm.id,
+          openingBalance: appliedLumpSums.openingBalance,
+          scheduledPayment: 0,
+          scheduledInterestPaid: 0,
+          scheduledPrincipalPaid: 0,
+          lumpSumPayment: appliedLumpSums.appliedAmount,
+          totalPayment: appliedLumpSums.appliedAmount,
+          totalPrincipalReduction: appliedLumpSums.appliedAmount,
+          closingBalance: appliedLumpSums.closingBalance,
+          annualInterestRate: scenario.initialTerm.annualInterestRate,
+          paymentFrequency: frequency,
+          eventType: appliedLumpSums.closingBalance === 0 ? 'final-payment' : 'lump-sum',
+          notes:
+            appliedLumpSums.closingBalance === 0
+              ? [...appliedLumpSums.notes, 'Mortgage paid off']
+              : appliedLumpSums.notes
+        });
+        nextSequence += 1;
+      }
+    }
+
+    if (balance === 0 || schedule.length >= MAX_SCHEDULE_ROWS) {
+      break;
+    }
+
     const openingBalance = roundMoney(balance);
-    const scheduledInterestPaid = roundMoney(openingBalance * periodicRate);
+    const sameDateLumpSums = applyLumpSumsForDate(
+      lumpSums,
+      paymentDate,
+      nextLumpSumIndex,
+      balance,
+      warnings
+    );
+    nextLumpSumIndex = sameDateLumpSums.nextIndex;
+
+    const balanceAfterLumpSums = sameDateLumpSums.closingBalance;
+    const scheduledInterestPaid = roundMoney(balanceAfterLumpSums * periodicRate);
     const regularPrincipalPaid = Math.max(0, regularPaymentAmount - scheduledInterestPaid);
     const isLastScheduledPayment = index === totalScheduledPayments - 1;
     const scheduledPrincipalPaid = roundMoney(
-      isLastScheduledPayment ? openingBalance : Math.min(openingBalance, regularPrincipalPaid)
+      balanceAfterLumpSums === 0
+        ? 0
+        : isLastScheduledPayment
+          ? balanceAfterLumpSums
+          : Math.min(balanceAfterLumpSums, regularPrincipalPaid)
     );
     const scheduledPayment = roundMoney(scheduledInterestPaid + scheduledPrincipalPaid);
-    const closingBalance = clampCentLevelBalance(openingBalance - scheduledPrincipalPaid);
+    const closingBalance = clampCentLevelBalance(balanceAfterLumpSums - scheduledPrincipalPaid);
     const isFinalPayment = closingBalance === 0;
+    const notes = [...sameDateLumpSums.notes];
+
+    if (isFinalPayment) {
+      notes.push('Mortgage paid off');
+    }
 
     schedule.push({
-      sequence: index + 1,
+      sequence: nextSequence,
       date: paymentDate,
       periodId: scenario.initialTerm.id,
       openingBalance,
       scheduledPayment,
       scheduledInterestPaid,
       scheduledPrincipalPaid,
-      lumpSumPayment: 0,
-      totalPayment: scheduledPayment,
-      totalPrincipalReduction: scheduledPrincipalPaid,
+      lumpSumPayment: sameDateLumpSums.appliedAmount,
+      totalPayment: roundMoney(scheduledPayment + sameDateLumpSums.appliedAmount),
+      totalPrincipalReduction: roundMoney(scheduledPrincipalPaid + sameDateLumpSums.appliedAmount),
       closingBalance,
       annualInterestRate: scenario.initialTerm.annualInterestRate,
       paymentFrequency: frequency,
-      eventType: isFinalPayment ? 'final-payment' : 'regular-payment',
-      notes: isFinalPayment ? ['Mortgage paid off'] : undefined
+      eventType: isFinalPayment
+        ? 'final-payment'
+        : sameDateLumpSums.appliedAmount > 0
+          ? 'lump-sum'
+          : 'regular-payment',
+      notes: notes.length > 0 ? notes : undefined
     });
+    nextSequence += 1;
 
     balance = closingBalance;
 
@@ -99,6 +181,7 @@ export function projectMortgageScenario(scenario: MortgageScenario): MortgagePro
 
   const summary = createProjectionSummary(scenario, regularPaymentAmount, schedule);
   const chartSeries = createChartSeries(scenario, schedule);
+  appendIgnoredLumpSumWarnings(lumpSums.slice(nextLumpSumIndex), warnings);
 
   return {
     scenarioId: scenario.id,
@@ -106,8 +189,81 @@ export function projectMortgageScenario(scenario: MortgageScenario): MortgagePro
     summary,
     schedule,
     chartSeries,
-    warnings: []
+    warnings
   };
+}
+
+function applyLumpSumsForDate(
+  lumpSums: LumpSumEvent[],
+  date: string,
+  startIndex: number,
+  balance: number,
+  warnings: ProjectionWarning[]
+): AppliedLumpSums & { nextIndex: number } {
+  let nextIndex = startIndex;
+  let currentBalance = roundMoney(balance);
+  const openingBalance = currentBalance;
+  let appliedAmount = 0;
+  const notes: string[] = [];
+
+  while (nextIndex < lumpSums.length && lumpSums[nextIndex].date === date) {
+    const lumpSum = lumpSums[nextIndex];
+
+    if (currentBalance === 0) {
+      warnings.push(createIgnoredLumpSumWarning(lumpSum));
+      nextIndex += 1;
+      continue;
+    }
+
+    const requestedAmount = roundMoney(lumpSum.amount);
+    const applied = roundMoney(Math.min(requestedAmount, currentBalance));
+
+    if (applied < requestedAmount) {
+      warnings.push({
+        code: 'lump-sum-capped',
+        message: `${describeLumpSum(lumpSum)} was capped at the remaining balance.`,
+        severity: 'warning',
+        date: lumpSum.date,
+        eventId: lumpSum.id
+      });
+    }
+
+    currentBalance = clampCentLevelBalance(currentBalance - applied);
+    appliedAmount = roundMoney(appliedAmount + applied);
+    notes.push(`${describeLumpSum(lumpSum)} applied`);
+    nextIndex += 1;
+  }
+
+  return {
+    openingBalance,
+    closingBalance: currentBalance,
+    appliedAmount,
+    notes,
+    nextIndex
+  };
+}
+
+function appendIgnoredLumpSumWarnings(
+  lumpSums: LumpSumEvent[],
+  warnings: ProjectionWarning[]
+): void {
+  for (const lumpSum of lumpSums) {
+    warnings.push(createIgnoredLumpSumWarning(lumpSum));
+  }
+}
+
+function createIgnoredLumpSumWarning(lumpSum: LumpSumEvent): ProjectionWarning {
+  return {
+    code: 'lump-sum-after-payoff',
+    message: `${describeLumpSum(lumpSum)} was ignored because the mortgage is already paid off.`,
+    severity: 'warning',
+    date: lumpSum.date,
+    eventId: lumpSum.id
+  };
+}
+
+function describeLumpSum(lumpSum: LumpSumEvent): string {
+  return lumpSum.label?.trim() ? `Lump sum "${lumpSum.label.trim()}"` : 'Lump sum payment';
 }
 
 function createProjectionSummary(
@@ -195,6 +351,19 @@ function validateScenario(scenario: MortgageScenario): void {
 
   if (!Number.isInteger(scenario.initialTerm.termMonths) || scenario.initialTerm.termMonths <= 0) {
     throw new Error('Initial term months must be a positive integer.');
+  }
+
+  for (const lumpSum of scenario.lumpSums) {
+    compareIsoDates(lumpSum.date, scenario.startDate);
+    assertNonNegativeFinite(lumpSum.amount, 'Lump-sum amount');
+
+    if (lumpSum.amount <= 0) {
+      throw new Error('Lump-sum amount must be greater than zero.');
+    }
+
+    if (compareIsoDates(lumpSum.date, scenario.startDate) < 0) {
+      throw new Error('Lump-sum date must be on or after the mortgage start date.');
+    }
   }
 }
 

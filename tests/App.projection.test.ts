@@ -52,4 +52,44 @@ describe('App projection wiring', () => {
       wrapper.unmount();
     }
   });
+
+  it('adds, edits, and deletes lump sums from the live projection', async () => {
+    const [{ mount }, { default: AppShell }] = await Promise.all([
+      import('@vue/test-utils'),
+      import('../src/app/AppShell')
+    ]);
+    const wrapper = mount(AppShell);
+
+    try {
+      expect(wrapper.text()).toContain('$2,908.02');
+      expect(wrapper.text()).toContain('Total lump sums');
+      expect(wrapper.text()).toContain('$0.00');
+
+      const addButton = wrapper
+        .findAll('button')
+        .find((button) => button.text() === 'Add lump sum');
+
+      expect(addButton).toBeTruthy();
+      await addButton?.trigger('click');
+
+      expect(wrapper.get('input[aria-label="Lump sum amount 1"]').element).toBeTruthy();
+      expect(wrapper.text()).toContain('$1,000.00');
+      expect(wrapper.text()).toContain('$2,908.02');
+
+      await wrapper.get('input[aria-label="Lump sum date 1"]').setValue('2027-01-10');
+      await wrapper.get('input[aria-label="Lump sum amount 1"]').setValue('25000');
+      await wrapper.get('input[aria-label="Lump sum label 1"]').setValue('Annual bonus');
+
+      expect(wrapper.text()).toContain('$25,000.00');
+      expect(wrapper.text()).toContain('Annual bonus');
+      expect(wrapper.text()).toContain('$2,908.02');
+
+      await wrapper.get('button[aria-label="Delete lump sum 1"]').trigger('click');
+
+      expect(wrapper.find('input[aria-label="Lump sum amount 1"]').exists()).toBe(false);
+      expect(wrapper.text()).toContain('No lump-sum payments yet.');
+    } finally {
+      wrapper.unmount();
+    }
+  });
 });

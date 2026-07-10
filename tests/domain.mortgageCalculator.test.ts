@@ -3,7 +3,10 @@ import {
   calculateScheduledPayment,
   projectMortgageScenario
 } from '../src/domain/mortgageCalculator';
-import type { MortgageScenario, PaymentFrequency } from '../src/domain/mortgageTypes';
+import { compareIsoDates } from '../src/domain/dateMath';
+import { getPeriodicRate } from '../src/domain/interestRates';
+import { roundMoney } from '../src/domain/money';
+import type { LumpSumEvent, MortgageScenario, PaymentFrequency } from '../src/domain/mortgageTypes';
 
 describe('mortgage calculator', () => {
   it('projects a monthly Canadian mortgage with payment split, summary, and chart series', () => {
@@ -195,6 +198,173 @@ describe('mortgage calculator', () => {
     expect(finalRow?.scheduledPrincipalPaid).toBe(finalRow?.openingBalance);
     expect(projection.summary.totalPrincipalPaid).toBe(1_000);
   });
+
+  it('applies an off-cycle lump sum before payoff as a separate principal reduction row', () => {
+    const projection = projectMortgageScenario(
+      makeScenario({
+        principalAmount: 12_000,
+        annualInterestRate: 0,
+        amortizationMonths: 12,
+        paymentFrequency: 'monthly',
+        lumpSums: [{ id: 'lump-1', date: '2026-06-01', amount: 3_000, label: 'Bonus' }]
+      })
+    );
+    const lumpSumRow = projection.schedule.find((row) => row.date === '2026-06-01');
+
+    expect(lumpSumRow).toMatchObject({
+      openingBalance: 7_000,
+      scheduledPayment: 0,
+      scheduledInterestPaid: 0,
+      scheduledPrincipalPaid: 0,
+      lumpSumPayment: 3_000,
+      totalPayment: 3_000,
+      totalPrincipalReduction: 3_000,
+      closingBalance: 4_000,
+      eventType: 'lump-sum',
+      notes: ['Lump sum "Bonus" applied']
+    });
+    expect(projection.summary.regularPaymentAmount).toBe(1_000);
+    expect(projection.summary.totalLumpSumsPaid).toBe(3_000);
+    expect(projection.summary.finalPaymentDate).toBe('2026-09-10');
+    expect(
+      projection.chartSeries.paymentBreakdown.find((point) => point.date === '2026-06-01')
+    ).toMatchObject({
+      scheduledInterestPaid: 0,
+      scheduledPrincipalPaid: 0,
+      lumpSumPayment: 3_000,
+      totalPrincipalReduction: 3_000
+    });
+    expect(projection.warnings).toEqual([]);
+  });
+
+  it('applies same-date lump sums before scheduled payment interest is calculated', () => {
+    const projection = projectMortgageScenario(
+      makeScenario({
+        principalAmount: 12_000,
+        annualInterestRate: 0.12,
+        amortizationMonths: 12,
+        paymentFrequency: 'monthly',
+        lumpSums: [{ id: 'lump-1', date: '2026-01-10', amount: 3_000, label: 'Start boost' }]
+      })
+    );
+    const firstRow = projection.schedule[0];
+    const periodicRate = getPeriodicRate(0.12, 12);
+    const interestOnFullBalance = roundMoney(12_000 * periodicRate);
+    const interestOnReducedBalance = roundMoney(9_000 * periodicRate);
+
+    expect(firstRow).toMatchObject({
+      date: '2026-01-10',
+      openingBalance: 12_000,
+      lumpSumPayment: 3_000,
+      scheduledInterestPaid: interestOnReducedBalance,
+      totalPrincipalReduction: firstRow.scheduledPrincipalPaid + 3_000,
+      eventType: 'lump-sum',
+      notes: ['Lump sum "Start boost" applied']
+    });
+    expect(firstRow.scheduledInterestPaid).toBeLessThan(interestOnFullBalance);
+    expect(projection.summary.totalLumpSumsPaid).toBe(3_000);
+  });
+
+  it('applies multiple lump sums without an artificial count limit', () => {
+    const lumpSums = Array.from({ length: 12 }, (_, index) => ({
+      id: `lump-${index + 1}`,
+      date: `2026-${String(index + 1).padStart(2, '0')}-15`,
+      amount: 100,
+      label: `Extra ${index + 1}`
+    }));
+    const projection = projectMortgageScenario(
+      makeScenario({
+        principalAmount: 24_000,
+        annualInterestRate: 0,
+        amortizationMonths: 24,
+        paymentFrequency: 'monthly',
+        lumpSums
+      })
+    );
+
+    expect(projection.summary.totalLumpSumsPaid).toBe(1_200);
+    expect(projection.schedule.filter((row) => row.lumpSumPayment > 0)).toHaveLength(12);
+    expect(projection.warnings).toEqual([]);
+  });
+
+  it('caps an excessive lump sum at the remaining balance and warns', () => {
+    const projection = projectMortgageScenario(
+      makeScenario({
+        principalAmount: 5_000,
+        annualInterestRate: 0,
+        amortizationMonths: 12,
+        paymentFrequency: 'monthly',
+        lumpSums: [{ id: 'lump-too-large', date: '2026-01-10', amount: 10_000 }]
+      })
+    );
+
+    expect(projection.schedule).toHaveLength(1);
+    expect(projection.schedule[0]).toMatchObject({
+      openingBalance: 5_000,
+      scheduledPayment: 0,
+      lumpSumPayment: 5_000,
+      closingBalance: 0,
+      eventType: 'final-payment'
+    });
+    expect(projection.summary.totalLumpSumsPaid).toBe(5_000);
+    expect(projection.summary.totalPrincipalPaid).toBe(0);
+    expect(projection.warnings).toMatchObject([
+      {
+        code: 'lump-sum-capped',
+        eventId: 'lump-too-large',
+        date: '2026-01-10',
+        severity: 'warning'
+      }
+    ]);
+  });
+
+  it('ignores post-payoff lump sums with a warning', () => {
+    const projection = projectMortgageScenario(
+      makeScenario({
+        principalAmount: 12_000,
+        annualInterestRate: 0,
+        amortizationMonths: 12,
+        paymentFrequency: 'monthly',
+        lumpSums: [{ id: 'lump-late', date: '2027-02-10', amount: 1_000 }]
+      })
+    );
+
+    expect(projection.schedule).toHaveLength(12);
+    expect(projection.summary.finalPaymentDate).toBe('2026-12-10');
+    expect(projection.summary.totalLumpSumsPaid).toBe(0);
+    expect(projection.warnings).toMatchObject([
+      {
+        code: 'lump-sum-after-payoff',
+        eventId: 'lump-late',
+        date: '2027-02-10',
+        severity: 'warning'
+      }
+    ]);
+  });
+
+  it('shortens payoff while keeping the scheduled payment unchanged until renewal', () => {
+    const baseline = projectMortgageScenario(
+      makeScenario({
+        principalAmount: 250_000,
+        annualInterestRate: 0.045,
+        amortizationMonths: 300,
+        paymentFrequency: 'monthly'
+      })
+    );
+    const withLumpSum = projectMortgageScenario(
+      makeScenario({
+        principalAmount: 250_000,
+        annualInterestRate: 0.045,
+        amortizationMonths: 300,
+        paymentFrequency: 'monthly',
+        lumpSums: [{ id: 'lump-1', date: '2027-01-10', amount: 25_000 }]
+      })
+    );
+
+    expect(withLumpSum.summary.regularPaymentAmount).toBe(baseline.summary.regularPaymentAmount);
+    expect(compareIsoDates(withLumpSum.summary.finalPaymentDate, baseline.summary.finalPaymentDate)).toBeLessThan(0);
+    expect(withLumpSum.summary.totalLumpSumsPaid).toBe(25_000);
+  });
 });
 
 type ScenarioOverrides = {
@@ -203,6 +373,7 @@ type ScenarioOverrides = {
   annualInterestRate: number;
   amortizationMonths: number;
   paymentFrequency: PaymentFrequency;
+  lumpSums?: LumpSumEvent[];
 };
 
 function makeScenario(overrides: ScenarioOverrides): MortgageScenario {
@@ -227,7 +398,7 @@ function makeScenario(overrides: ScenarioOverrides): MortgageScenario {
       paymentFrequency,
       paymentStrategy: 'recalculate-payment'
     },
-    lumpSums: [],
+    lumpSums: overrides.lumpSums ?? [],
     renewals: []
   };
 }

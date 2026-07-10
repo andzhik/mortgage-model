@@ -8,11 +8,13 @@ import { computed, defineComponent, h, reactive } from 'vue';
 import { formatDate, formatMoney, formatPercent } from './formatters';
 import { projectMortgageScenario } from '../domain/mortgageCalculator';
 import type {
+  LumpSumEvent,
   MortgageProjection,
   MortgageScenario,
   PaymentFrequency,
   PaymentScheduleRow,
   ProjectionChartSeries,
+  ProjectionWarning,
   ProjectionSummary
 } from '../domain/mortgageTypes';
 import { PAYMENT_FREQUENCY_METADATA } from '../domain/paymentFrequency';
@@ -26,7 +28,14 @@ export type MortgageInputUpdate = Partial<{
   paymentFrequency: PaymentFrequency;
 }>;
 
+export type LumpSumInputUpdate = Partial<{
+  date: string;
+  amount: number;
+  label: string;
+}>;
+
 const today = new Date().toISOString().slice(0, 10);
+let nextLumpSumId = 1;
 
 function makeDefaultScenario(): MortgageScenario {
   return {
@@ -333,6 +342,37 @@ const PaymentScheduleTable = defineComponent({
   }
 });
 
+const ProjectionWarningsPanel = defineComponent({
+  name: 'ProjectionWarningsPanel',
+  props: {
+    warnings: {
+      type: Array as () => ProjectionWarning[],
+      required: true
+    }
+  },
+  setup(props) {
+    return () =>
+      h('section', { class: 'panel editor-section', 'aria-labelledby': 'projection-warnings-heading' }, [
+        h('div', { class: 'panel-heading' }, [
+          h('h2', { id: 'projection-warnings-heading' }, 'Projection warnings'),
+          h('span', { class: 'status-pill' }, props.warnings.length === 0 ? 'Clear' : props.warnings.length)
+        ]),
+        props.warnings.length === 0
+          ? h('div', { class: 'compact-empty-state' }, 'No projection warnings.')
+          : h(
+              'ul',
+              { class: 'warning-list' },
+              props.warnings.map((warning) =>
+                h('li', { key: `${warning.code}-${warning.eventId ?? warning.date}` }, [
+                  h('strong', warning.date ? formatDate(warning.date) : 'Projection'),
+                  h('span', warning.message)
+                ])
+              )
+            )
+      ]);
+  }
+});
+
 const MortgageInputs = defineComponent({
   name: 'MortgageInputs',
   props: {
@@ -514,11 +554,86 @@ const RenewalEditorShell = defineComponent({
 
 const LumpSumEditorShell = defineComponent({
   name: 'LumpSumEditorShell',
-  setup() {
+  props: {
+    scenario: {
+      type: Object as () => MortgageScenario,
+      required: true
+    }
+  },
+  emits: {
+    addLumpSum: () => true,
+    updateLumpSum: (_id: string, _update: LumpSumInputUpdate) => true,
+    deleteLumpSum: (_id: string) => true
+  },
+  setup(props, { emit }) {
+    function toNumber(event: Event): number {
+      const value = Number((event.target as HTMLInputElement).value);
+      return Number.isFinite(value) ? value : 0;
+    }
+
+    function toText(event: Event): string {
+      return (event.target as HTMLInputElement).value;
+    }
+
     return () =>
       h('section', { class: 'panel editor-section', 'aria-labelledby': 'lump-sum-editor-heading' }, [
-        panelHeading('Lump sums', 'Add lump sum'),
-        h('div', { class: 'compact-empty-state' }, 'No lump-sum payments yet.')
+        h('div', { class: 'panel-heading' }, [
+          h('h2', { id: 'lump-sum-editor-heading' }, 'Lump sums'),
+          h('button', { type: 'button', onClick: () => emit('addLumpSum') }, 'Add lump sum')
+        ]),
+        props.scenario.lumpSums.length === 0
+          ? h('div', { class: 'compact-empty-state' }, 'No lump-sum payments yet.')
+          : h(
+              'div',
+              { class: 'event-list' },
+              props.scenario.lumpSums.map((lumpSum, index) =>
+                h('div', { class: 'event-row', key: lumpSum.id }, [
+                  h('label', [
+                    'Date',
+                    h('input', {
+                      'aria-label': `Lump sum date ${index + 1}`,
+                      type: 'date',
+                      value: lumpSum.date,
+                      min: props.scenario.startDate,
+                      onInput: (event: Event) =>
+                        emit('updateLumpSum', lumpSum.id, { date: toText(event) })
+                    })
+                  ]),
+                  h('label', [
+                    'Amount',
+                    h('input', {
+                      'aria-label': `Lump sum amount ${index + 1}`,
+                      type: 'number',
+                      value: lumpSum.amount,
+                      min: '1',
+                      step: '100',
+                      onInput: (event: Event) =>
+                        emit('updateLumpSum', lumpSum.id, { amount: toNumber(event) })
+                    })
+                  ]),
+                  h('label', [
+                    'Label',
+                    h('input', {
+                      'aria-label': `Lump sum label ${index + 1}`,
+                      type: 'text',
+                      value: lumpSum.label ?? '',
+                      onInput: (event: Event) =>
+                        emit('updateLumpSum', lumpSum.id, { label: toText(event) })
+                    })
+                  ]),
+                  h(
+                    'button',
+                    {
+                      type: 'button',
+                      class: 'danger-button event-delete-button',
+                      'aria-label': `Delete lump sum ${index + 1}`,
+                      onClick: () => emit('deleteLumpSum', lumpSum.id)
+                    },
+                    'Delete'
+                  )
+                ])
+              )
+            )
       ]);
   }
 });
@@ -535,8 +650,13 @@ export default defineComponent({
       }
 
       if (update.startDate !== undefined) {
-        scenario.startDate = update.startDate;
-        scenario.initialTerm.startDate = update.startDate;
+        const startDate = update.startDate;
+        scenario.startDate = startDate;
+        scenario.initialTerm.startDate = startDate;
+        scenario.lumpSums = scenario.lumpSums.map((lumpSum) => ({
+          ...lumpSum,
+          date: lumpSum.date < startDate ? startDate : lumpSum.date
+        }));
       }
 
       if (update.amortizationMonths !== undefined) {
@@ -557,6 +677,49 @@ export default defineComponent({
       }
 
       scenario.updatedAt = new Date().toISOString();
+    }
+
+    function touchScenario(): void {
+      scenario.updatedAt = new Date().toISOString();
+    }
+
+    function addLumpSum(): void {
+      scenario.lumpSums.push({
+        id: `lump-sum-${Date.now()}-${nextLumpSumId}`,
+        date: scenario.startDate,
+        amount: 1_000,
+        label: undefined
+      });
+      nextLumpSumId += 1;
+      touchScenario();
+    }
+
+    function updateLumpSum(id: string, update: LumpSumInputUpdate): void {
+      const lumpSum = scenario.lumpSums.find((candidate) => candidate.id === id);
+
+      if (!lumpSum) {
+        return;
+      }
+
+      if (update.date !== undefined && update.date) {
+        lumpSum.date = update.date < scenario.startDate ? scenario.startDate : update.date;
+      }
+
+      if (update.amount !== undefined) {
+        lumpSum.amount = Math.max(1, update.amount);
+      }
+
+      if (update.label !== undefined) {
+        const label = update.label.trim();
+        lumpSum.label = label.length > 0 ? label : undefined;
+      }
+
+      touchScenario();
+    }
+
+    function deleteLumpSum(id: string): void {
+      scenario.lumpSums = scenario.lumpSums.filter((lumpSum: LumpSumEvent) => lumpSum.id !== id);
+      touchScenario();
     }
 
     return () =>
@@ -584,7 +747,13 @@ export default defineComponent({
               onUpdateScenario: updateScenario
             }),
             h(RenewalEditorShell),
-            h(LumpSumEditorShell)
+            h(LumpSumEditorShell, {
+              scenario,
+              onAddLumpSum: addLumpSum,
+              onUpdateLumpSum: updateLumpSum,
+              onDeleteLumpSum: deleteLumpSum
+            }),
+            h(ProjectionWarningsPanel, { warnings: projection.value.warnings })
           ])
         ])
       ]);
