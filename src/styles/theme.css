@@ -149,62 +149,40 @@
 }
 
 .chart-panel {
-  min-height: 320px;
+  min-height: 360px;
 }
 
-.chart-placeholder {
+.chart-canvas-wrap {
+  height: 300px;
+  padding: 18px 16px 12px;
+}
+
+.term-band-strip {
   display: grid;
-  place-items: center;
-  min-height: 260px;
-  padding: 24px;
-  color: #5f747d;
-  text-align: center;
-  background:
-    linear-gradient(#eff4f6 1px, transparent 1px),
-    linear-gradient(90deg, #eff4f6 1px, transparent 1px);
-  background-size: 36px 36px;
+  gap: 2px;
+  border-bottom: 1px solid #d8e0e4;
+  padding: 10px 16px 0;
 }
 
-.chart-line {
-  width: min(420px, 86%);
-  height: 80px;
-  margin-bottom: 12px;
-  border-bottom: 4px solid #2f6f75;
-  border-left: 4px solid transparent;
-  border-radius: 0 0 5px 5px;
-  transform: skewY(-8deg);
+.term-band-segment {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  min-height: 30px;
+  border-top: 4px solid #6b4fb3;
+  padding: 3px 8px;
+  color: #40545d;
+  background: #eef3f4;
+  font-size: 0.74rem;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.bar-placeholder {
-  gap: 14px;
-}
-
-.bar-set {
-  display: grid;
-  grid-template-columns: repeat(3, 38px);
-  align-items: end;
-  gap: 10px;
-  height: 96px;
-}
-
-.bar {
-  display: block;
-  border-radius: 5px 5px 0 0;
-}
-
-.bar.interest {
-  height: 88px;
-  background: #9f4a54;
-}
-
-.bar.principal {
-  height: 58px;
-  background: #2f6f75;
-}
-
-.bar.lump-sum {
-  height: 34px;
-  background: #b88a2e;
+.term-band-segment:nth-child(even) {
+  border-top-color: #2f6f75;
+  background: #f4f7f8;
 }
 
 .schedule-panel {

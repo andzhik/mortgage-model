@@ -11,12 +11,13 @@ import type {
   PaymentFrequency,
   PaymentStrategy,
   PaymentScheduleRow,
-  ProjectionChartSeries,
   ProjectionWarning,
   ProjectionSummary,
   RenewalEvent
 } from '../domain/mortgageTypes';
 import { PAYMENT_FREQUENCY_METADATA } from '../domain/paymentFrequency';
+import BalanceChart from '../components/BalanceChart.vue';
+import PaymentBreakdownChart from '../components/PaymentBreakdownChart.vue';
 import {
   useScenarioStore,
   type LumpSumInputUpdate,
@@ -156,93 +157,6 @@ const SummaryMetrics = defineComponent({
           )
         )
       ]);
-  }
-});
-
-const BalanceChart = defineComponent({
-  name: 'BalanceChart',
-  props: {
-    series: {
-      type: Array as () => ProjectionChartSeries['balanceOverTime'],
-      required: true
-    }
-  },
-  setup(props) {
-    return () => {
-      const firstPoint = props.series[0];
-      const lastPoint = props.series.at(-1);
-
-      return h('section', { class: 'panel chart-panel', 'aria-labelledby': 'balance-chart-heading' }, [
-        h('div', { class: 'panel-heading' }, [
-          h('h2', { id: 'balance-chart-heading' }, 'Balance over time'),
-          h('span', { class: 'status-pill' }, `${props.series.length} points`)
-        ]),
-        h(
-          'div',
-          {
-            class: 'chart-placeholder',
-            role: 'img',
-            'aria-label': 'Balance projection preview'
-          },
-          [
-            h('div', { class: 'chart-line chart-line-balance' }),
-            firstPoint && lastPoint
-              ? h(
-                  'span',
-                  `${firstPoint.date} balance ${formatMoney(firstPoint.balance)} to ${lastPoint.date} balance ${formatMoney(lastPoint.balance)}.`
-                )
-              : null
-          ]
-        )
-      ]);
-    };
-  }
-});
-
-const PaymentBreakdownChart = defineComponent({
-  name: 'PaymentBreakdownChart',
-  props: {
-    series: {
-      type: Array as () => ProjectionChartSeries['paymentBreakdown'],
-      required: true
-    }
-  },
-  setup(props) {
-    return () => {
-      const firstPoint = props.series[0];
-
-      return h(
-        'section',
-        { class: 'panel chart-panel', 'aria-labelledby': 'breakdown-chart-heading' },
-        [
-          h('div', { class: 'panel-heading' }, [
-            h('h2', { id: 'breakdown-chart-heading' }, 'Payment breakdown'),
-            h('span', { class: 'status-pill' }, 'Projected')
-          ]),
-          h(
-            'div',
-            {
-              class: 'chart-placeholder bar-placeholder',
-              role: 'img',
-              'aria-label': 'Payment breakdown preview'
-            },
-            [
-              h('div', { class: 'bar-set', 'aria-hidden': 'true' }, [
-                h('span', { class: 'bar interest' }),
-                h('span', { class: 'bar principal' }),
-                h('span', { class: 'bar lump-sum' })
-              ]),
-              firstPoint
-                ? h(
-                    'span',
-                    `First payment: ${formatMoney(firstPoint.scheduledInterestPaid)} interest, ${formatMoney(firstPoint.scheduledPrincipalPaid)} principal, ${formatMoney(firstPoint.lumpSumPayment)} lump sum.`
-                  )
-                : null
-            ]
-          )
-        ]
-      );
-    };
   }
 });
 
@@ -841,8 +755,8 @@ export default defineComponent({
             ]),
             h(SummaryMetrics, { summary: projection.summary }),
             h('div', { class: 'chart-grid', 'aria-label': 'Projection charts' }, [
-              h(BalanceChart, { series: projection.chartSeries.balanceOverTime }),
-              h(PaymentBreakdownChart, { series: projection.chartSeries.paymentBreakdown })
+              h(BalanceChart, { chartSeries: projection.chartSeries }),
+              h(PaymentBreakdownChart, { chartSeries: projection.chartSeries })
             ]),
             h(PaymentScheduleTable, { rows: projection.schedule })
           ]),
