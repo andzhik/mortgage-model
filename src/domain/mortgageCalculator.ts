@@ -524,7 +524,7 @@ function createProjectionSummary(
   regularPaymentAmount: number,
   schedule: PaymentScheduleRow[]
 ): ProjectionSummary {
-  const nextPayment = schedule[0];
+  const nextPayment = schedule.find((row) => row.scheduledPayment > 0);
   const totalInterestPaid = roundMoney(
     schedule.reduce((total, row) => total + row.scheduledInterestPaid, 0)
   );

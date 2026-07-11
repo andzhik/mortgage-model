@@ -1,7 +1,8 @@
 import { mount } from '@vue/test-utils';
 import { describe, expect, it } from 'vitest';
-import BalanceChart from '../src/components/BalanceChart.vue';
-import PaymentBreakdownChart from '../src/components/PaymentBreakdownChart.vue';
+import BalanceChart from '../src/components/BalanceChart';
+import ChartRenderer from '../src/components/ChartRenderer';
+import PaymentBreakdownChart from '../src/components/PaymentBreakdownChart';
 import type { ProjectionChartSeries } from '../src/domain/mortgageTypes';
 
 describe('chart components', () => {
@@ -23,6 +24,14 @@ describe('chart components', () => {
       ).toBe('Scheduled interest|Scheduled principal|Lump sums');
       expect(balanceWrapper.findAll('.term-band-segment')).toHaveLength(2);
       expect(balanceWrapper.text()).toContain('Initial term');
+      expect(balanceWrapper.getComponent(ChartRenderer).props('data').datasets).toHaveLength(3);
+      expect(balanceWrapper.getComponent(ChartRenderer).props('options')).toMatchObject({
+        responsive: true
+      });
+      expect(breakdownWrapper.getComponent(ChartRenderer).props('data').datasets).toHaveLength(3);
+      expect(breakdownWrapper.getComponent(ChartRenderer).props('options')).toMatchObject({
+        responsive: true
+      });
     } finally {
       balanceWrapper.unmount();
       breakdownWrapper.unmount();

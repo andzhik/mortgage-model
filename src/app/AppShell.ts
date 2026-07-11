@@ -16,8 +16,8 @@ import type {
   RenewalEvent
 } from '../domain/mortgageTypes';
 import { PAYMENT_FREQUENCY_METADATA } from '../domain/paymentFrequency';
-import BalanceChart from '../components/BalanceChart.vue';
-import PaymentBreakdownChart from '../components/PaymentBreakdownChart.vue';
+import BalanceChart from '../components/BalanceChart';
+import PaymentBreakdownChart from '../components/PaymentBreakdownChart';
 import {
   useScenarioStore,
   type LumpSumInputUpdate,

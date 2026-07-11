@@ -242,6 +242,33 @@ describe('mortgage calculator', () => {
     expect(projection.warnings).toEqual([]);
   });
 
+  it('reports the next scheduled split when an off-cycle lump sum is the first row', () => {
+    const projection = projectMortgageScenario(
+      makeScenario({
+        principalAmount: 12_000,
+        annualInterestRate: 0.05,
+        amortizationMonths: 12,
+        paymentFrequency: 'semi-monthly',
+        lumpSums: [{ id: 'lump-before-first-payment', date: '2026-01-10', amount: 1_000 }]
+      })
+    );
+    const nextScheduledPayment = projection.schedule.find((row) => row.scheduledPayment > 0);
+
+    expect(projection.schedule[0]).toMatchObject({
+      date: '2026-01-10',
+      scheduledPayment: 0,
+      lumpSumPayment: 1_000
+    });
+    expect(projection.summary.nextPaymentInterestPortion).toBe(
+      nextScheduledPayment?.scheduledInterestPaid
+    );
+    expect(projection.summary.nextPaymentPrincipalPortion).toBe(
+      nextScheduledPayment?.scheduledPrincipalPaid
+    );
+    expect(projection.summary.nextPaymentInterestPortion).toBeGreaterThan(0);
+    expect(projection.summary.nextPaymentPrincipalPortion).toBeGreaterThan(0);
+  });
+
   it('applies same-date lump sums before scheduled payment interest is calculated', () => {
     const projection = projectMortgageScenario(
       makeScenario({
