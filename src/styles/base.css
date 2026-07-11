@@ -40,6 +40,13 @@ button:hover {
   border-color: #47636d;
 }
 
+button:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 3px solid rgb(39 103 112 / 0.28);
+  outline-offset: 2px;
+}
+
 input,
 select {
   width: 100%;
@@ -49,6 +56,11 @@ select {
   padding: 6px 10px;
   color: #17212b;
   background: #ffffff;
+}
+
+input[aria-invalid="true"],
+select[aria-invalid="true"] {
+  border-color: #a53b3b;
 }
 
 table {

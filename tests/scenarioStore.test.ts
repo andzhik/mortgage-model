@@ -153,4 +153,24 @@ describe('scenario store', () => {
     expect(saved.schemaVersion).toBe(1);
     expect(saved.scenarios).toHaveLength(1);
   });
+
+  it('keeps renewal dates ordered and unique when the mortgage start date advances', () => {
+    const store = useScenarioStore({
+      repository: createLocalStorageRepository(new MemoryStorage(), fixedNow),
+      now: fixedNow,
+      idFactory: createSequentialIdFactory(),
+      debounceMs: 1000
+    });
+
+    store.addRenewal();
+    store.addRenewal();
+    store.updateScenario({ startDate: '2040-01-01' });
+
+    const renewalDates = store.activeScenario.value.renewals.map(
+      (renewal) => renewal.effectiveDate
+    );
+    expect(renewalDates).toEqual(['2040-01-01', '2040-01-02']);
+    expect(new Set(renewalDates).size).toBe(renewalDates.length);
+    expect(() => store.projection.value).not.toThrow();
+  });
 });

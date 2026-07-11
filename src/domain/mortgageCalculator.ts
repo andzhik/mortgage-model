@@ -13,7 +13,7 @@ import type {
   ProjectionWarning,
   RenewalEvent
 } from './mortgageTypes';
-import { getPaymentsPerYear } from './paymentFrequency';
+import { PAYMENT_FREQUENCY_METADATA, getPaymentsPerYear } from './paymentFrequency';
 
 const MAX_SCHEDULE_ROWS = 10_000;
 
@@ -600,6 +600,10 @@ function validateScenario(scenario: MortgageScenario): void {
     throw new Error('Initial term months must be a positive integer.');
   }
 
+  if (!Object.hasOwn(PAYMENT_FREQUENCY_METADATA, scenario.paymentFrequency)) {
+    throw new Error('Payment frequency is required.');
+  }
+
   for (const lumpSum of scenario.lumpSums) {
     compareIsoDates(lumpSum.date, scenario.startDate);
     assertNonNegativeFinite(lumpSum.amount, 'Lump-sum amount');
@@ -613,6 +617,8 @@ function validateScenario(scenario: MortgageScenario): void {
     }
   }
 
+  const renewalDates = new Set<string>();
+
   for (const renewal of scenario.renewals) {
     compareIsoDates(renewal.effectiveDate, scenario.startDate);
     assertNonNegativeFinite(renewal.annualInterestRate, 'Renewal annual interest rate');
@@ -623,6 +629,19 @@ function validateScenario(scenario: MortgageScenario): void {
 
     if (compareIsoDates(renewal.effectiveDate, scenario.startDate) < 0) {
       throw new Error('Renewal date must be on or after the mortgage start date.');
+    }
+
+    if (renewalDates.has(renewal.effectiveDate)) {
+      throw new Error('Renewal dates must be unique.');
+    }
+
+    renewalDates.add(renewal.effectiveDate);
+
+    if (
+      renewal.paymentFrequency !== undefined &&
+      !Object.hasOwn(PAYMENT_FREQUENCY_METADATA, renewal.paymentFrequency)
+    ) {
+      throw new Error('Renewal payment frequency is required.');
     }
   }
 }

@@ -8,6 +8,7 @@ import type {
   RenewalEvent
 } from '../domain/mortgageTypes';
 import { projectMortgageScenario } from '../domain/mortgageCalculator';
+import { addDays, addMonths } from '../domain/dateMath';
 import {
   createLocalStorageRepository,
   type ScenarioRepository,
@@ -210,10 +211,18 @@ export function useScenarioStore(options: ScenarioStoreOptions = {}) {
         ...lumpSum,
         date: lumpSum.date < startDate ? startDate : lumpSum.date
       }));
-      scenario.renewals = scenario.renewals.map((renewal) => ({
-        ...renewal,
-        effectiveDate: renewal.effectiveDate < startDate ? startDate : renewal.effectiveDate
-      }));
+      let earliestRenewalDate = startDate;
+      scenario.renewals = [...scenario.renewals]
+        .sort((left, right) => left.effectiveDate.localeCompare(right.effectiveDate))
+        .map((renewal) => {
+          const effectiveDate =
+            renewal.effectiveDate < earliestRenewalDate
+              ? earliestRenewalDate
+              : renewal.effectiveDate;
+          earliestRenewalDate = addDays(effectiveDate, 1);
+
+          return { ...renewal, effectiveDate };
+        });
     }
 
     if (update.amortizationMonths !== undefined) {
@@ -280,10 +289,16 @@ export function useScenarioStore(options: ScenarioStoreOptions = {}) {
 
   function addRenewal(): void {
     const scenario = activeScenario.value;
+    const previousRenewal = [...scenario.renewals].sort((left, right) =>
+      left.effectiveDate.localeCompare(right.effectiveDate)
+    ).at(-1);
+    const effectiveDate = previousRenewal
+      ? addMonths(previousRenewal.effectiveDate, previousRenewal.termMonths)
+      : addMonths(scenario.startDate, scenario.initialTerm.termMonths);
 
     scenario.renewals.push({
       id: idFactory('renewal'),
-      effectiveDate: scenario.startDate,
+      effectiveDate,
       termMonths: scenario.initialTerm.termMonths,
       annualInterestRate: scenario.initialTerm.annualInterestRate,
       paymentFrequency: scenario.paymentFrequency,
@@ -304,6 +319,9 @@ export function useScenarioStore(options: ScenarioStoreOptions = {}) {
     if (update.effectiveDate !== undefined && update.effectiveDate) {
       renewal.effectiveDate =
         update.effectiveDate < scenario.startDate ? scenario.startDate : update.effectiveDate;
+      scenario.renewals.sort((left, right) =>
+        left.effectiveDate.localeCompare(right.effectiveDate)
+      );
     }
 
     if (update.termMonths !== undefined) {

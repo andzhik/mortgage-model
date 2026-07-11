@@ -4,7 +4,7 @@ import {
   getCoreRowModel,
   useVueTable
 } from '@tanstack/vue-table';
-import { computed, defineComponent, h } from 'vue';
+import { computed, defineComponent, h, reactive, watch } from 'vue';
 import { formatDate, formatMoney, formatPercent } from './formatters';
 import type {
   MortgageScenario,
@@ -29,6 +29,23 @@ type ScenarioOption = {
   readonly id: string;
   readonly name: string;
 };
+
+function fieldError(id: string, message?: string) {
+  return message
+    ? h('span', { id, class: 'field-error', role: 'alert' }, message)
+    : null;
+}
+
+function validationAttributes(id: string, message?: string) {
+  return {
+    'aria-invalid': message ? 'true' : undefined,
+    'aria-describedby': message ? id : undefined
+  };
+}
+
+function clearErrors(errors: Record<string, string | undefined>): void {
+  for (const key of Object.keys(errors)) delete errors[key];
+}
 
 const ScenarioBar = defineComponent({
   name: 'ScenarioBar',
@@ -291,7 +308,11 @@ const ProjectionWarningsPanel = defineComponent({
   },
   setup(props) {
     return () =>
-      h('section', { class: 'panel editor-section', 'aria-labelledby': 'projection-warnings-heading' }, [
+      h('section', {
+        class: 'panel editor-section',
+        'aria-labelledby': 'projection-warnings-heading',
+        'aria-live': 'polite'
+      }, [
         h('div', { class: 'panel-heading' }, [
           h('h2', { id: 'projection-warnings-heading' }, 'Projection warnings'),
           h('span', { class: 'status-pill' }, props.warnings.length === 0 ? 'Clear' : props.warnings.length)
@@ -300,10 +321,13 @@ const ProjectionWarningsPanel = defineComponent({
           ? h('div', { class: 'compact-empty-state' }, 'No projection warnings.')
           : h(
               'ul',
-              { class: 'warning-list' },
+              { class: 'warning-list', role: 'list' },
               props.warnings.map((warning) =>
-                h('li', { key: `${warning.code}-${warning.eventId ?? warning.date}` }, [
-                  h('strong', warning.date ? formatDate(warning.date) : 'Projection'),
+                h('li', {
+                  key: `${warning.code}-${warning.eventId ?? warning.date}`,
+                  'data-severity': warning.severity
+                }, [
+                  h('strong', `${warning.severity === 'error' ? 'Error' : 'Warning'} · ${warning.date ? formatDate(warning.date) : 'Projection'}`),
                   h('span', warning.message)
                 ])
               )
@@ -325,6 +349,8 @@ const MortgageInputs = defineComponent({
   },
   setup(props, { emit }) {
     const frequencies = Object.values(PAYMENT_FREQUENCY_METADATA);
+    const errors = reactive<Record<string, string | undefined>>({});
+    watch(() => props.scenario.id, () => clearErrors(errors));
 
     function toNumber(event: Event): number {
       const value = Number((event.target as HTMLInputElement).value);
@@ -338,21 +364,38 @@ const MortgageInputs = defineComponent({
     function updateStartDate(event: Event): void {
       const startDate = toText(event);
 
-      if (startDate) {
-        emit('updateScenario', { startDate });
-      }
+      errors.startDate = startDate ? undefined : 'Start date is required.';
+      if (startDate) emit('updateScenario', { startDate });
     }
 
     function updateAmortization(years: number, months: number): void {
-      emit('updateScenario', {
-        amortizationMonths: Math.max(1, years * 12 + months)
-      });
+      const totalMonths = years * 12 + months;
+      errors.amortization = totalMonths > 0 ? undefined : 'Amortization must be greater than zero.';
+      if (totalMonths > 0) emit('updateScenario', { amortizationMonths: totalMonths });
     }
 
     function updateTerm(years: number, months: number): void {
-      emit('updateScenario', {
-        termMonths: Math.max(1, years * 12 + months)
-      });
+      const totalMonths = years * 12 + months;
+      errors.term = totalMonths > 0 ? undefined : 'Term length must be greater than zero.';
+      if (totalMonths > 0) emit('updateScenario', { termMonths: totalMonths });
+    }
+
+    function updatePrincipal(event: Event): void {
+      const amount = toNumber(event);
+      errors.principal = amount > 0 ? undefined : 'Mortgage amount must be greater than zero.';
+      if (amount > 0) emit('updateScenario', { principalAmount: amount });
+    }
+
+    function updateInterestRate(event: Event): void {
+      const rate = toNumber(event);
+      errors.interestRate = rate >= 0 ? undefined : 'Interest rate cannot be negative.';
+      if (rate >= 0) emit('updateScenario', { annualInterestRate: rate / 100 });
+    }
+
+    function updateFrequency(event: Event): void {
+      const frequency = toText(event) as PaymentFrequency;
+      errors.paymentFrequency = frequency ? undefined : 'Payment frequency is required.';
+      if (frequency) emit('updateScenario', { paymentFrequency: frequency });
     }
 
     return () => {
@@ -376,9 +419,10 @@ const MortgageInputs = defineComponent({
               value: props.scenario.principalAmount,
               min: '1',
               step: '1000',
-              onInput: (event: Event) =>
-                emit('updateScenario', { principalAmount: Math.max(1, toNumber(event)) })
-            })
+              ...validationAttributes('principal-error', errors.principal),
+              onInput: updatePrincipal
+            }),
+            fieldError('principal-error', errors.principal)
           ]),
           h('label', [
             'Start date',
@@ -386,8 +430,11 @@ const MortgageInputs = defineComponent({
               'aria-label': 'Start date',
               type: 'date',
               value: props.scenario.startDate,
+              required: true,
+              ...validationAttributes('start-date-error', errors.startDate),
               onInput: updateStartDate
-            })
+            }),
+            fieldError('start-date-error', errors.startDate)
           ]),
           h('label', [
             'Amortization years',
@@ -397,9 +444,11 @@ const MortgageInputs = defineComponent({
               value: amortizationYears,
               min: '0',
               step: '1',
+              ...validationAttributes('amortization-error', errors.amortization),
               onInput: (event: Event) =>
                 updateAmortization(Math.max(0, toNumber(event)), amortizationExtraMonths)
-            })
+            }),
+            fieldError('amortization-error', errors.amortization)
           ]),
           h('label', [
             'Amortization months',
@@ -410,6 +459,7 @@ const MortgageInputs = defineComponent({
               min: '0',
               max: '11',
               step: '1',
+              ...validationAttributes('amortization-error', errors.amortization),
               onInput: (event: Event) =>
                 updateAmortization(amortizationYears, Math.min(11, Math.max(0, toNumber(event))))
             })
@@ -422,8 +472,10 @@ const MortgageInputs = defineComponent({
               value: termYears,
               min: '0',
               step: '1',
+              ...validationAttributes('term-error', errors.term),
               onInput: (event: Event) => updateTerm(Math.max(0, toNumber(event)), termExtraMonths)
-            })
+            }),
+            fieldError('term-error', errors.term)
           ]),
           h('label', [
             'Term months',
@@ -434,6 +486,7 @@ const MortgageInputs = defineComponent({
               min: '0',
               max: '11',
               step: '1',
+              ...validationAttributes('term-error', errors.term),
               onInput: (event: Event) =>
                 updateTerm(termYears, Math.min(11, Math.max(0, toNumber(event))))
             })
@@ -446,11 +499,10 @@ const MortgageInputs = defineComponent({
               value: annualInterestRatePercent,
               min: '0',
               step: '0.01',
-              onInput: (event: Event) =>
-                emit('updateScenario', {
-                  annualInterestRate: Math.max(0, toNumber(event)) / 100
-                })
-            })
+              ...validationAttributes('interest-rate-error', errors.interestRate),
+              onInput: updateInterestRate
+            }),
+            fieldError('interest-rate-error', errors.interestRate)
           ]),
           h('label', [
             'Payment frequency',
@@ -459,13 +511,15 @@ const MortgageInputs = defineComponent({
               {
                 'aria-label': 'Payment frequency',
                 value: props.scenario.paymentFrequency,
-                onChange: (event: Event) =>
-                  emit('updateScenario', { paymentFrequency: toText(event) as PaymentFrequency })
+                required: true,
+                ...validationAttributes('payment-frequency-error', errors.paymentFrequency),
+                onChange: updateFrequency
               },
-              frequencies.map((frequency) =>
+              [h('option', { value: '', disabled: true }, 'Select a frequency'), ...frequencies.map((frequency) =>
                 h('option', { key: frequency.frequency, value: frequency.frequency }, frequency.label)
-              )
-            )
+              )]
+            ),
+            fieldError('payment-frequency-error', errors.paymentFrequency)
           ])
         ])
       ]);
@@ -488,6 +542,8 @@ const RenewalEditorShell = defineComponent({
   },
   setup(props, { emit }) {
     const frequencies = Object.values(PAYMENT_FREQUENCY_METADATA);
+    const errors = reactive<Record<string, string | undefined>>({});
+    watch(() => props.scenario.id, () => clearErrors(errors));
     const paymentStrategies: { strategy: PaymentStrategy; label: string }[] = [
       { strategy: 'recalculate-payment', label: 'Recalculate payment' },
       { strategy: 'keep-payment-reduce-time', label: 'Keep payment, reduce time' }
@@ -503,9 +559,40 @@ const RenewalEditorShell = defineComponent({
     }
 
     function updateTerm(renewal: RenewalEvent, years: number, months: number): void {
-      emit('updateRenewal', renewal.id, {
-        termMonths: Math.max(1, years * 12 + months)
-      });
+      const totalMonths = years * 12 + months;
+      const key = `${renewal.id}-term`;
+      errors[key] = totalMonths > 0 ? undefined : 'Term length must be greater than zero.';
+      if (totalMonths > 0) emit('updateRenewal', renewal.id, { termMonths: totalMonths });
+    }
+
+    function updateDate(renewal: RenewalEvent, event: Event): void {
+      const date = toText(event);
+      const duplicate = props.scenario.renewals.some(
+        (candidate) => candidate.id !== renewal.id && candidate.effectiveDate === date
+      );
+      const message = !date
+        ? 'Renewal date is required.'
+        : date < props.scenario.startDate
+          ? 'Renewal date must be on or after the mortgage start date.'
+          : duplicate
+            ? 'Renewal dates must be unique.'
+            : undefined;
+      errors[`${renewal.id}-date`] = message;
+      if (!message) emit('updateRenewal', renewal.id, { effectiveDate: date });
+    }
+
+    function updateRate(renewal: RenewalEvent, event: Event): void {
+      const rate = toNumber(event);
+      const key = `${renewal.id}-rate`;
+      errors[key] = rate >= 0 ? undefined : 'Interest rate cannot be negative.';
+      if (rate >= 0) emit('updateRenewal', renewal.id, { annualInterestRate: rate / 100 });
+    }
+
+    function updateFrequency(renewal: RenewalEvent, event: Event): void {
+      const frequency = toText(event) as PaymentFrequency;
+      const key = `${renewal.id}-frequency`;
+      errors[key] = frequency ? undefined : 'Payment frequency is required.';
+      if (frequency) emit('updateRenewal', renewal.id, { paymentFrequency: frequency });
     }
 
     return () =>
@@ -522,6 +609,10 @@ const RenewalEditorShell = defineComponent({
               props.scenario.renewals.map((renewal, index) => {
                 const termYears = Math.floor(renewal.termMonths / 12);
                 const termExtraMonths = renewal.termMonths % 12;
+                const dateErrorId = `${renewal.id}-date-error`;
+                const rateErrorId = `${renewal.id}-rate-error`;
+                const termErrorId = `${renewal.id}-term-error`;
+                const frequencyErrorId = `${renewal.id}-frequency-error`;
 
                 return h('div', { class: 'event-row renewal-row', key: renewal.id }, [
                   h('label', [
@@ -531,9 +622,11 @@ const RenewalEditorShell = defineComponent({
                       type: 'date',
                       value: renewal.effectiveDate,
                       min: props.scenario.startDate,
-                      onInput: (event: Event) =>
-                        emit('updateRenewal', renewal.id, { effectiveDate: toText(event) })
-                    })
+                      required: true,
+                      ...validationAttributes(dateErrorId, errors[`${renewal.id}-date`]),
+                      onInput: (event: Event) => updateDate(renewal, event)
+                    }),
+                    fieldError(dateErrorId, errors[`${renewal.id}-date`])
                   ]),
                   h('label', [
                     'Annual interest rate',
@@ -543,11 +636,10 @@ const RenewalEditorShell = defineComponent({
                       value: renewal.annualInterestRate * 100,
                       min: '0',
                       step: '0.01',
-                      onInput: (event: Event) =>
-                        emit('updateRenewal', renewal.id, {
-                          annualInterestRate: Math.max(0, toNumber(event)) / 100
-                        })
-                    })
+                      ...validationAttributes(rateErrorId, errors[`${renewal.id}-rate`]),
+                      onInput: (event: Event) => updateRate(renewal, event)
+                    }),
+                    fieldError(rateErrorId, errors[`${renewal.id}-rate`])
                   ]),
                   h('label', [
                     'Term years',
@@ -557,9 +649,11 @@ const RenewalEditorShell = defineComponent({
                       value: termYears,
                       min: '0',
                       step: '1',
+                      ...validationAttributes(termErrorId, errors[`${renewal.id}-term`]),
                       onInput: (event: Event) =>
                         updateTerm(renewal, Math.max(0, toNumber(event)), termExtraMonths)
-                    })
+                    }),
+                    fieldError(termErrorId, errors[`${renewal.id}-term`])
                   ]),
                   h('label', [
                     'Term months',
@@ -570,6 +664,7 @@ const RenewalEditorShell = defineComponent({
                       min: '0',
                       max: '11',
                       step: '1',
+                      ...validationAttributes(termErrorId, errors[`${renewal.id}-term`]),
                       onInput: (event: Event) =>
                         updateTerm(renewal, termYears, Math.min(11, Math.max(0, toNumber(event))))
                     })
@@ -581,19 +676,19 @@ const RenewalEditorShell = defineComponent({
                       {
                         'aria-label': `Renewal payment frequency ${index + 1}`,
                         value: renewal.paymentFrequency ?? props.scenario.paymentFrequency,
-                        onChange: (event: Event) =>
-                          emit('updateRenewal', renewal.id, {
-                            paymentFrequency: toText(event) as PaymentFrequency
-                          })
+                        required: true,
+                        ...validationAttributes(frequencyErrorId, errors[`${renewal.id}-frequency`]),
+                        onChange: (event: Event) => updateFrequency(renewal, event)
                       },
-                      frequencies.map((frequency) =>
+                      [h('option', { value: '', disabled: true }, 'Select a frequency'), ...frequencies.map((frequency) =>
                         h(
                           'option',
                           { key: frequency.frequency, value: frequency.frequency },
                           frequency.label
                         )
-                      )
-                    )
+                      )]
+                    ),
+                    fieldError(frequencyErrorId, errors[`${renewal.id}-frequency`])
                   ]),
                   h('label', [
                     'Payment strategy',
@@ -653,6 +748,9 @@ const LumpSumEditorShell = defineComponent({
     deleteLumpSum: (_id: string) => true
   },
   setup(props, { emit }) {
+    const errors = reactive<Record<string, string | undefined>>({});
+    watch(() => props.scenario.id, () => clearErrors(errors));
+
     function toNumber(event: Event): number {
       const value = Number((event.target as HTMLInputElement).value);
       return Number.isFinite(value) ? value : 0;
@@ -660,6 +758,24 @@ const LumpSumEditorShell = defineComponent({
 
     function toText(event: Event): string {
       return (event.target as HTMLInputElement).value;
+    }
+
+    function updateDate(id: string, event: Event): void {
+      const date = toText(event);
+      const message = !date
+        ? 'Lump-sum date is required.'
+        : date < props.scenario.startDate
+          ? 'Lump-sum date must be on or after the mortgage start date.'
+          : undefined;
+      errors[`${id}-date`] = message;
+      if (!message) emit('updateLumpSum', id, { date });
+    }
+
+    function updateAmount(id: string, event: Event): void {
+      const amount = toNumber(event);
+      const message = amount > 0 ? undefined : 'Lump-sum amount must be greater than zero.';
+      errors[`${id}-amount`] = message;
+      if (!message) emit('updateLumpSum', id, { amount });
     }
 
     return () =>
@@ -673,8 +789,10 @@ const LumpSumEditorShell = defineComponent({
           : h(
               'div',
               { class: 'event-list' },
-              props.scenario.lumpSums.map((lumpSum, index) =>
-                h('div', { class: 'event-row', key: lumpSum.id }, [
+              props.scenario.lumpSums.map((lumpSum, index) => {
+                const dateErrorId = `${lumpSum.id}-date-error`;
+                const amountErrorId = `${lumpSum.id}-amount-error`;
+                return h('div', { class: 'event-row', key: lumpSum.id }, [
                   h('label', [
                     'Date',
                     h('input', {
@@ -682,9 +800,11 @@ const LumpSumEditorShell = defineComponent({
                       type: 'date',
                       value: lumpSum.date,
                       min: props.scenario.startDate,
-                      onInput: (event: Event) =>
-                        emit('updateLumpSum', lumpSum.id, { date: toText(event) })
-                    })
+                      required: true,
+                      ...validationAttributes(dateErrorId, errors[`${lumpSum.id}-date`]),
+                      onInput: (event: Event) => updateDate(lumpSum.id, event)
+                    }),
+                    fieldError(dateErrorId, errors[`${lumpSum.id}-date`])
                   ]),
                   h('label', [
                     'Amount',
@@ -694,9 +814,10 @@ const LumpSumEditorShell = defineComponent({
                       value: lumpSum.amount,
                       min: '1',
                       step: '100',
-                      onInput: (event: Event) =>
-                        emit('updateLumpSum', lumpSum.id, { amount: toNumber(event) })
-                    })
+                      ...validationAttributes(amountErrorId, errors[`${lumpSum.id}-amount`]),
+                      onInput: (event: Event) => updateAmount(lumpSum.id, event)
+                    }),
+                    fieldError(amountErrorId, errors[`${lumpSum.id}-amount`])
                   ]),
                   h('label', [
                     'Label',
@@ -718,8 +839,8 @@ const LumpSumEditorShell = defineComponent({
                     },
                     'Delete'
                   )
-                ])
-              )
+                ]);
+              })
             )
       ]);
   }

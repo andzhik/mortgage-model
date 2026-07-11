@@ -544,6 +544,62 @@ describe('mortgage calculator', () => {
       eventType: 'renewal'
     });
   });
+
+  it('rejects duplicate renewal dates before calculating a projection', () => {
+    const duplicateRenewal = (id: string): RenewalEvent => ({
+      id,
+      effectiveDate: '2031-01-10',
+      termMonths: 60,
+      annualInterestRate: 0.04,
+      paymentFrequency: 'monthly',
+      paymentStrategy: 'recalculate-payment'
+    });
+
+    expect(() =>
+      projectMortgageScenario(
+        makeScenario({
+          principalAmount: 250_000,
+          annualInterestRate: 0.045,
+          amortizationMonths: 300,
+          paymentFrequency: 'monthly',
+          renewals: [duplicateRenewal('renewal-1'), duplicateRenewal('renewal-2')]
+        })
+      )
+    ).toThrow('Renewal dates must be unique.');
+  });
+
+  it('rejects unsupported initial and renewal payment frequencies', () => {
+    const invalidInitial = makeScenario({
+      principalAmount: 250_000,
+      annualInterestRate: 0.045,
+      amortizationMonths: 300,
+      paymentFrequency: 'monthly'
+    });
+    invalidInitial.paymentFrequency = 'toString' as PaymentFrequency;
+
+    expect(() => projectMortgageScenario(invalidInitial)).toThrow('Payment frequency is required.');
+
+    const invalidRenewal: RenewalEvent = {
+      id: 'invalid-frequency-renewal',
+      effectiveDate: '2031-01-10',
+      termMonths: 60,
+      annualInterestRate: 0.04,
+      paymentFrequency: 'toString' as PaymentFrequency,
+      paymentStrategy: 'recalculate-payment'
+    };
+
+    expect(() =>
+      projectMortgageScenario(
+        makeScenario({
+          principalAmount: 250_000,
+          annualInterestRate: 0.045,
+          amortizationMonths: 300,
+          paymentFrequency: 'monthly',
+          renewals: [invalidRenewal]
+        })
+      )
+    ).toThrow('Renewal payment frequency is required.');
+  });
 });
 
 type ScenarioOverrides = {

@@ -219,6 +219,13 @@
   font-weight: 700;
 }
 
+.field-error {
+  color: #8a2424;
+  font-size: 0.76rem;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
 .compact-empty-state {
   padding: 18px 16px;
   color: #5f747d;
@@ -320,5 +327,18 @@
 
   .metric:last-child {
     border-bottom: 0;
+  }
+
+  .chart-panel {
+    min-height: 300px;
+  }
+
+  .chart-canvas-wrap {
+    height: 250px;
+  }
+
+  .table-scroll {
+    max-width: 100%;
+    -webkit-overflow-scrolling: touch;
   }
 }
