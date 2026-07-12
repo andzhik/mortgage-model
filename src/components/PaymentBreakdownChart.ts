@@ -1,9 +1,10 @@
 import {
-  BarElement,
   CategoryScale,
   Chart as ChartJS,
   Legend,
   LinearScale,
+  LineElement,
+  PointElement,
   Tooltip
 } from 'chart.js';
 import { computed, defineComponent, h } from 'vue';
@@ -13,7 +14,7 @@ import type { ProjectionChartSeries } from '../domain/mortgageTypes';
 import ChartRenderer from './ChartRenderer';
 import { measureMortgageWork } from '../performance/uiPerformance';
 
-ChartJS.register(CategoryScale, LinearScale, BarElement, Tooltip, Legend);
+ChartJS.register(CategoryScale, LinearScale, LineElement, PointElement, Tooltip, Legend);
 
 export default defineComponent({
   name: 'PaymentBreakdownChart',
@@ -32,7 +33,9 @@ export default defineComponent({
 
     return () => {
       const prepared = preparedChart.value;
-      const firstPoint = props.chartSeries.paymentBreakdown[0];
+      const firstPoint = props.chartSeries.paymentBreakdown.find(
+        (point) => point.scheduledInterestPaid > 0 || point.scheduledPrincipalPaid > 0
+      );
       const pointLabel =
         prepared.granularity === 'payment'
           ? `${prepared.sourcePointCount} payments`
@@ -49,10 +52,10 @@ export default defineComponent({
             class: 'chart-canvas-wrap',
             role: 'img',
             'aria-label': firstPoint
-              ? `Payment breakdown starts with ${formatMoney(firstPoint.scheduledInterestPaid)} interest, ${formatMoney(firstPoint.scheduledPrincipalPaid)} principal, and ${formatMoney(firstPoint.lumpSumPayment)} lump sum.`
+              ? `Regular payment breakdown starts with ${formatMoney(firstPoint.scheduledPrincipalPaid)} paid to principal and ${formatMoney(firstPoint.scheduledInterestPaid)} interest.`
               : 'Payment breakdown chart.'
           },
-          [h(ChartRenderer, { kind: 'bar', data: prepared.data, options: prepared.options })]
+          [h(ChartRenderer, { kind: 'line', data: prepared.data, options: prepared.options })]
         )
       ]);
     };

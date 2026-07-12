@@ -20,8 +20,8 @@ describe('chart components', () => {
         'Remaining balance|Lump-sum payments|Renewals'
       );
       expect(
-        breakdownWrapper.get('[data-chart-kind="bar"]').attributes('data-dataset-labels')
-      ).toBe('Scheduled interest|Scheduled principal|Lump sums');
+        breakdownWrapper.get('[data-chart-kind="line"]').attributes('data-dataset-labels')
+      ).toBe('Payment to principal|Interest');
       expect(balanceWrapper.findAll('.term-band-segment')).toHaveLength(2);
       expect(balanceWrapper.text()).toContain('Initial term');
       expect(balanceWrapper.getComponent(ChartRenderer).props('data').datasets).toHaveLength(3);
@@ -29,7 +29,8 @@ describe('chart components', () => {
         responsive: true,
         animation: false
       });
-      expect(breakdownWrapper.getComponent(ChartRenderer).props('data').datasets).toHaveLength(3);
+      expect(breakdownWrapper.getComponent(ChartRenderer).props('kind')).toBe('line');
+      expect(breakdownWrapper.getComponent(ChartRenderer).props('data').datasets).toHaveLength(2);
       expect(breakdownWrapper.getComponent(ChartRenderer).props('options')).toMatchObject({
         responsive: true,
         animation: false

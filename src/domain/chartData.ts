@@ -14,8 +14,8 @@ export type PreparedBalanceChart = {
 };
 
 export type PreparedPaymentBreakdownChart = {
-  data: ChartData<'bar', number[], string>;
-  options: ChartOptions<'bar'>;
+  data: ChartData<'line', number[], string>;
+  options: ChartOptions<'line'>;
   granularity: ChartGranularity;
   sourcePointCount: number;
 };
@@ -23,8 +23,8 @@ export type PreparedPaymentBreakdownChart = {
 export const CHART_COLORS = {
   balance: '#276a73',
   renewal: '#6b4fb3',
-  interest: '#9f4a54',
-  principal: '#2f6f75',
+  interest: '#dc2626',
+  principal: '#2563eb',
   lumpSum: '#b88a2e'
 } as const;
 
@@ -91,43 +91,41 @@ export function prepareBalanceChart(
 
 export function preparePaymentBreakdownChart(
   chartSeries: ProjectionChartSeries,
-  granularity: ChartGranularity = chooseChartGranularity(chartSeries.paymentBreakdown.length)
+  granularity?: ChartGranularity
 ): PreparedPaymentBreakdownChart {
-  const buckets = createPaymentBuckets(chartSeries, granularity);
+  const regularPayments = chartSeries.paymentBreakdown.filter(isRegularPaymentPoint);
+  const resolvedGranularity = granularity ?? chooseChartGranularity(regularPayments.length);
+  const buckets = createPaymentBuckets(regularPayments, resolvedGranularity);
 
   return {
     data: {
       labels: buckets.map((bucket) => bucket.label),
       datasets: [
         {
-          label: 'Scheduled interest',
-          data: buckets.map((bucket) => roundChartValue(bucket.scheduledInterestPaid)),
-          backgroundColor: CHART_COLORS.interest,
-          borderColor: CHART_COLORS.interest,
-          borderWidth: 1,
-          stack: 'payments'
-        },
-        {
-          label: 'Scheduled principal',
+          label: 'Payment to principal',
           data: buckets.map((bucket) => roundChartValue(bucket.scheduledPrincipalPaid)),
           backgroundColor: CHART_COLORS.principal,
           borderColor: CHART_COLORS.principal,
-          borderWidth: 1,
-          stack: 'payments'
+          borderWidth: 2,
+          pointRadius: buckets.length > 160 ? 0 : 2,
+          pointHoverRadius: 5,
+          tension: 0.18
         },
         {
-          label: 'Lump sums',
-          data: buckets.map((bucket) => roundChartValue(bucket.lumpSumPayment)),
-          backgroundColor: CHART_COLORS.lumpSum,
-          borderColor: CHART_COLORS.lumpSum,
-          borderWidth: 1,
-          stack: 'payments'
+          label: 'Interest',
+          data: buckets.map((bucket) => roundChartValue(bucket.scheduledInterestPaid)),
+          backgroundColor: CHART_COLORS.interest,
+          borderColor: CHART_COLORS.interest,
+          borderWidth: 2,
+          pointRadius: buckets.length > 160 ? 0 : 2,
+          pointHoverRadius: 5,
+          tension: 0.18
         }
       ]
     },
-    options: createBarOptions(),
-    granularity,
-    sourcePointCount: chartSeries.paymentBreakdown.length
+    options: createLineOptions(),
+    granularity: resolvedGranularity,
+    sourcePointCount: regularPayments.length
   };
 }
 
@@ -155,7 +153,6 @@ type PaymentBucket = {
   label: string;
   scheduledInterestPaid: number;
   scheduledPrincipalPaid: number;
-  lumpSumPayment: number;
 };
 
 function createBalanceBuckets(
@@ -210,30 +207,32 @@ function createBalanceBuckets(
 }
 
 function createPaymentBuckets(
-  chartSeries: ProjectionChartSeries,
+  points: ProjectionChartSeries['paymentBreakdown'],
   granularity: ChartGranularity
 ): PaymentBucket[] {
   const bucketMap = new Map<string, PaymentBucket>();
 
-  for (const point of chartSeries.paymentBreakdown) {
+  for (const point of points) {
     const label = toBucketLabel(point.date, granularity);
     const existing = bucketMap.get(label);
 
     if (existing) {
       existing.scheduledInterestPaid += point.scheduledInterestPaid;
       existing.scheduledPrincipalPaid += point.scheduledPrincipalPaid;
-      existing.lumpSumPayment += point.lumpSumPayment;
     } else {
       bucketMap.set(label, {
         label,
         scheduledInterestPaid: point.scheduledInterestPaid,
-        scheduledPrincipalPaid: point.scheduledPrincipalPaid,
-        lumpSumPayment: point.lumpSumPayment
+        scheduledPrincipalPaid: point.scheduledPrincipalPaid
       });
     }
   }
 
   return [...bucketMap.values()];
+}
+
+function isRegularPaymentPoint(point: ProjectionChartSeries['paymentBreakdown'][number]): boolean {
+  return point.scheduledInterestPaid > 0 || point.scheduledPrincipalPaid > 0;
 }
 
 function createLineOptions(): ChartOptions<'line'> {
@@ -266,43 +265,6 @@ function createLineOptions(): ChartOptions<'line'> {
         }
       },
       y: {
-        beginAtZero: true,
-        ticks: {
-          callback: (value) => formatCompactMoney(Number(value))
-        }
-      }
-    }
-  };
-}
-
-function createBarOptions(): ChartOptions<'bar'> {
-  return {
-    responsive: true,
-    maintainAspectRatio: false,
-    animation: false,
-    plugins: {
-      legend: {
-        position: 'bottom'
-      },
-      tooltip: {
-        callbacks: {
-          label: (context) => `${context.dataset.label}: ${formatChartMoney(context.parsed.y)}`
-        }
-      }
-    },
-    scales: {
-      x: {
-        stacked: true,
-        ticks: {
-          maxRotation: 0,
-          autoSkip: true
-        },
-        grid: {
-          display: false
-        }
-      },
-      y: {
-        stacked: true,
         beginAtZero: true,
         ticks: {
           callback: (value) => formatCompactMoney(Number(value))

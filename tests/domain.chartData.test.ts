@@ -47,29 +47,36 @@ describe('chart data preparation', () => {
     expect(chart.termBands.map((band) => band.label)).toEqual(['Initial term', 'Renewal 1']);
   });
 
-  it('aggregates payment breakdown into monthly buckets while preserving separated values', () => {
+  it('renders regular-payment principal and interest as line datasets without lump sums', () => {
     const projection = projectMortgageScenario(
       makeScenario({
         principalAmount: 500_000,
         annualInterestRate: 0.05,
         amortizationMonths: 300,
         paymentFrequency: 'monthly',
-        lumpSums: [{ id: 'lump-1', date: '2027-01-10', amount: 25_000 }]
+        lumpSums: [{ id: 'lump-1', date: '2027-01-15', amount: 25_000 }]
       })
     );
     const chart = preparePaymentBreakdownChart(projection.chartSeries);
-    const [interestDataset, principalDataset, lumpSumDataset] = chart.data.datasets;
+    const paymentLevelChart = preparePaymentBreakdownChart(projection.chartSeries, 'payment');
+    const [principalDataset, interestDataset] = chart.data.datasets;
 
     expect(chart.granularity).toBe('month');
     expect(chart.data.labels?.length).toBeLessThanOrEqual(projection.schedule.length);
     expect(chart.data.datasets.map((dataset) => dataset.label)).toEqual([
-      'Scheduled interest',
-      'Scheduled principal',
-      'Lump sums'
+      'Payment to principal',
+      'Interest'
     ]);
+    expect(principalDataset.borderColor).toBe('#2563eb');
+    expect(interestDataset.borderColor).toBe('#dc2626');
     expect(sumDataset(interestDataset.data)).toBe(projection.summary.totalInterestPaid);
     expect(sumDataset(principalDataset.data)).toBe(projection.summary.totalPrincipalPaid);
-    expect(sumDataset(lumpSumDataset.data)).toBe(25_000);
+    expect(paymentLevelChart.data.labels).not.toContain('2027-01-15');
+    expect(chart.sourcePointCount).toBe(
+      projection.chartSeries.paymentBreakdown.filter(
+        (point) => point.scheduledInterestPaid > 0 || point.scheduledPrincipalPaid > 0
+      ).length
+    );
   });
 
   it('uses yearly aggregation for dense weekly projections', () => {
