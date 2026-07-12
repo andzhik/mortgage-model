@@ -2,7 +2,7 @@
 
 ## Status
 
-Discussion draft with initial product decisions. This document records the suspected bottleneck, challenges the proposed direction, and identifies decisions still required before implementation. It does not authorize calculation or UI behavior changes by itself.
+Partially implemented. Browser phase measurements confirmed that full-table DOM patching and post-update browser work dominated input latency. Fixed-height row virtualization and animation-free Chart.js updates are now implemented; chart rebucketing and projection-display debouncing remain pending measurement rather than being assumed necessary.
 
 ## Decisions recorded
 
@@ -101,6 +101,21 @@ Use a 150 ms projection-display debounce initially. The input's own visible valu
 
 ## Measurements collected so far
 
+### Browser measurements before virtualization
+
+For a default 300-row monthly schedule, one representative input update reported:
+
+| Phase | Result |
+| --- | ---: |
+| Pure projection | 1.20 ms |
+| Payment-table render function | 40.90 ms |
+| Scenario mutation to Vue updated hook | 301.40 ms |
+| Vue updated hook to first animation frame | 138.30 ms |
+| First to second animation frame | 190.00 ms |
+| Scenario mutation to next-paint checkpoint | 629.70 ms |
+
+The gap between virtual-node construction and the Vue updated hook strongly implicated DOM patching of the full table. Delayed animation-frame callbacks also justified disabling Chart.js animation for live projection changes. These phase measurements are elapsed-time boundaries, not a claim that the final 190 ms was exclusively paint work.
+
 These are isolated Bun timings on the current development machine, not browser interaction or paint measurements:
 
 | Scenario/work | Result |
@@ -142,12 +157,12 @@ The next-paint measurement includes two animation frames so it is useful for rel
 
 1. Add a repeatable performance scenario for monthly and weekly 25-30 year schedules.
 2. Record baseline input latency, mounted row/cell count, and chart update time in a production build.
-3. Add row virtualization while preserving the existing table API and full schedule.
+3. Add row virtualization while preserving the existing table API and full schedule. **Completed.**
 4. Verify scrolling, sticky headers, focus behavior, event rows, and accessibility.
 5. Replace the current point-count thresholds with two-month calendar bucketing for long projections.
 6. Preserve first/payoff points and explicit lump-sum/renewal markers.
 7. Verify payment-breakdown bucket totals against full schedule totals.
-8. Re-profile input latency and chart/table work.
+8. Re-profile input latency and chart/table work. **Next step.**
 9. Tune the initial 150 ms projection-display debounce from measured interaction behavior.
 
 ## Acceptance criteria

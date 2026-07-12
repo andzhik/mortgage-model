@@ -26,11 +26,13 @@ describe('chart components', () => {
       expect(balanceWrapper.text()).toContain('Initial term');
       expect(balanceWrapper.getComponent(ChartRenderer).props('data').datasets).toHaveLength(3);
       expect(balanceWrapper.getComponent(ChartRenderer).props('options')).toMatchObject({
-        responsive: true
+        responsive: true,
+        animation: false
       });
       expect(breakdownWrapper.getComponent(ChartRenderer).props('data').datasets).toHaveLength(3);
       expect(breakdownWrapper.getComponent(ChartRenderer).props('options')).toMatchObject({
-        responsive: true
+        responsive: true,
+        animation: false
       });
     } finally {
       balanceWrapper.unmount();

@@ -36,6 +36,12 @@ describe('App shell', () => {
       expect(host.textContent).toContain('Mortgage inputs');
       expect(host.textContent).toContain('Renewals');
       expect(host.textContent).toContain('Lump sums');
+      expect(host.querySelector('table')?.getAttribute('aria-rowcount')).toBe('301');
+      const mountedScheduleRows = host.querySelectorAll('tbody tr[data-sequence]');
+      expect(mountedScheduleRows.length).toBeGreaterThan(0);
+      expect(mountedScheduleRows.length).toBeLessThan(300);
+      expect(mountedScheduleRows[0]?.getAttribute('data-sequence')).toBe('1');
+      expect(mountedScheduleRows[0]?.getAttribute('aria-rowindex')).toBe('2');
     } finally {
       app.unmount();
       host.remove();

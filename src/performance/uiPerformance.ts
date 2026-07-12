@@ -13,6 +13,10 @@ declare global {
 let enabled = false;
 let pendingUiUpdateStartedAt: number | undefined;
 
+function logMortgageDuration(label: string, startedAt: number, finishedAt: number): void {
+  console.log(`[mortgage performance] ${label}: ${(finishedAt - startedAt).toFixed(2)} ms`);
+}
+
 export function measureMortgageWork<T>(label: string, work: () => T): T {
   if (!enabled) {
     return work();
@@ -23,7 +27,7 @@ export function measureMortgageWork<T>(label: string, work: () => T): T {
   try {
     return work();
   } finally {
-    console.log(`[mortgage performance] ${label}: ${(performance.now() - startedAt).toFixed(2)} ms`);
+    logMortgageDuration(label, startedAt, performance.now());
   }
 }
 
@@ -40,12 +44,22 @@ export function finishMortgageUiUpdateAfterPaint(): void {
 
   const startedAt = pendingUiUpdateStartedAt;
   pendingUiUpdateStartedAt = undefined;
+  const vueUpdatedAt = performance.now();
+
+  logMortgageDuration('scenario mutation → Vue updated hook', startedAt, vueUpdatedAt);
 
   requestAnimationFrame(() => {
+    const firstAnimationFrameAt = performance.now();
+    logMortgageDuration(
+      'Vue updated hook → first animation frame',
+      vueUpdatedAt,
+      firstAnimationFrameAt
+    );
+
     requestAnimationFrame(() => {
-      console.log(
-        `[mortgage performance] scenario mutation → next paint: ${(performance.now() - startedAt).toFixed(2)} ms`
-      );
+      const nextPaintAt = performance.now();
+      logMortgageDuration('first → second animation frame', firstAnimationFrameAt, nextPaintAt);
+      logMortgageDuration('scenario mutation → next paint', startedAt, nextPaintAt);
     });
   });
 }
@@ -70,4 +84,3 @@ if (typeof window !== 'undefined') {
 
   window.__mortgagePerformance = api;
 }
-

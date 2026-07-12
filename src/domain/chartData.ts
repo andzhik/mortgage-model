@@ -240,6 +240,7 @@ function createLineOptions(): ChartOptions<'line'> {
   return {
     responsive: true,
     maintainAspectRatio: false,
+    animation: false,
     interaction: {
       mode: 'index',
       intersect: false
@@ -278,6 +279,7 @@ function createBarOptions(): ChartOptions<'bar'> {
   return {
     responsive: true,
     maintainAspectRatio: false,
+    animation: false,
     plugins: {
       legend: {
         position: 'bottom'

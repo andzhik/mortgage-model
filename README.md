@@ -71,9 +71,14 @@ Change a valid mortgage input such as **Mortgage amount**. Each update reports:
 - `payment chart preparation`: creation of the payment-breakdown dataset;
 - `AppShell render function`: root Vue virtual-node construction;
 - `payment table render function`: schedule row and cell virtual-node construction;
+- `scenario mutation → Vue updated hook`: reactive invalidation, virtual-node construction, and Vue DOM patching;
+- `Vue updated hook → first animation frame`: browser work and frame wait after Vue commits the DOM;
+- `first → second animation frame`: the final frame interval used to cross a paint opportunity;
 - `scenario mutation → next paint`: approximate end-to-end time from the scenario change through the next browser paint.
 
 The mutation-to-next-paint result is the closest built-in measurement of user-visible latency. It deliberately waits for two animation frames, so use it for relative before/after comparisons rather than treating it as a precise breakdown of browser work. Use the browser's Performance panel when layout, paint, scripting, or Chart.js animation must be separated.
+
+The payment schedule keeps the complete projection available to TanStack Table while mounting only the visible fixed-height rows plus a small overscan window. Chart updates are intentionally not animated so live input changes do not schedule continuing canvas work across later frames.
 
 For useful comparisons:
 

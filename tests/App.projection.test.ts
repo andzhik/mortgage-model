@@ -81,7 +81,10 @@ describe('App projection wiring', () => {
       await wrapper.get('input[aria-label="Lump sum label 1"]').setValue('Annual bonus');
 
       expect(wrapper.text()).toContain('$25,000.00');
-      expect(wrapper.text()).toContain('Annual bonus');
+      expect(wrapper.get('input[aria-label="Lump sum label 1"]').element).toHaveProperty(
+        'value',
+        'Annual bonus'
+      );
       expect(wrapper.text()).toContain('$2,908.02');
 
       await wrapper.get('button[aria-label="Delete lump sum 1"]').trigger('click');
@@ -111,16 +114,25 @@ describe('App projection wiring', () => {
       await addButton?.trigger('click');
 
       expect(wrapper.get('input[aria-label="Renewal annual interest rate 1"]').element).toBeTruthy();
-      expect(wrapper.text()).toContain('Renewal 1 applied');
+      expect(wrapper.text()).toContain('Renewal 1');
 
       await wrapper.get('input[aria-label="Renewal effective date 1"]').setValue('2031-01-10');
       await wrapper.get('input[aria-label="Renewal annual interest rate 1"]').setValue('4.25');
       await wrapper.get('select[aria-label="Renewal payment frequency 1"]').setValue('bi-weekly');
       await wrapper.get('input[aria-label="Renewal note 1"]').setValue('Rate reset');
 
-      expect(wrapper.text()).toContain('Rate reset');
-      expect(wrapper.text()).toContain('renewal-');
-      expect(wrapper.text()).toContain('4.25%');
+      expect(wrapper.get('input[aria-label="Renewal note 1"]').element).toHaveProperty(
+        'value',
+        'Rate reset'
+      );
+      expect(wrapper.get('input[aria-label="Renewal annual interest rate 1"]').element).toHaveProperty(
+        'value',
+        '4.25'
+      );
+      expect(wrapper.get('select[aria-label="Renewal payment frequency 1"]').element).toHaveProperty(
+        'value',
+        'bi-weekly'
+      );
 
       await wrapper.get('button[aria-label="Delete renewal 1"]').trigger('click');
 

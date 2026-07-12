@@ -4,7 +4,8 @@ import {
   getCoreRowModel,
   useVueTable
 } from '@tanstack/vue-table';
-import { computed, defineComponent, h, onUpdated, reactive, watch } from 'vue';
+import { useVirtualizer } from '@tanstack/vue-virtual';
+import { computed, defineComponent, h, onUpdated, reactive, ref, watch } from 'vue';
 import { formatDate, formatMoney, formatPercent } from './formatters';
 import type {
   MortgageScenario,
@@ -238,6 +239,7 @@ const PaymentScheduleTable = defineComponent({
     }
   },
   setup(props) {
+    const scrollElement = ref<HTMLElement | null>(null);
     const table = useVueTable({
       get data() {
         return props.rows;
@@ -245,16 +247,37 @@ const PaymentScheduleTable = defineComponent({
       columns: scheduleColumns,
       getCoreRowModel: getCoreRowModel()
     });
+    const rowVirtualizer = useVirtualizer(
+      computed(() => ({
+        count: table.getRowModel().rows.length,
+        getScrollElement: () => scrollElement.value,
+        estimateSize: () => 45,
+        getItemKey: (index: number) =>
+          table.getRowModel().rows[index]?.original.sequence ?? index,
+        overscan: 10,
+        initialRect: { width: 0, height: 420 }
+      }))
+    );
 
-    return () =>
-      measureMortgageWork('payment table render function', () =>
+    return () => {
+      return measureMortgageWork('payment table render function', () => {
+        const rows = table.getRowModel().rows;
+        const virtualRows = rowVirtualizer.value.getVirtualItems();
+        const firstVirtualRow = virtualRows[0];
+        const lastVirtualRow = virtualRows.at(-1);
+        const paddingTop = firstVirtualRow?.start ?? 0;
+        const paddingBottom = lastVirtualRow
+          ? rowVirtualizer.value.getTotalSize() - lastVirtualRow.end
+          : 0;
+
+        return (
         h('section', { class: 'panel schedule-panel', 'aria-labelledby': 'schedule-heading' }, [
         h('div', { class: 'panel-heading' }, [
           h('h2', { id: 'schedule-heading' }, 'Payment schedule'),
           h('span', { class: 'status-pill' }, `${props.rows.length} rows`)
         ]),
-        h('div', { class: 'table-scroll' }, [
-          h('table', [
+        h('div', { ref: scrollElement, class: 'table-scroll' }, [
+          h('table', { 'aria-rowcount': rows.length + 1 }, [
             h(
               'thead',
               table.getHeaderGroups().map((headerGroup) =>
@@ -275,7 +298,7 @@ const PaymentScheduleTable = defineComponent({
               )
             ),
             h('tbody', [
-              table.getRowModel().rows.length === 0
+              rows.length === 0
                 ? h('tr', [
                     h(
                       'td',
@@ -283,10 +306,26 @@ const PaymentScheduleTable = defineComponent({
                       'No payment schedule rows yet.'
                     )
                   ])
-                : table.getRowModel().rows.map((row) =>
+                : [
+                    paddingTop > 0
+                      ? h('tr', { class: 'virtual-table-spacer', 'aria-hidden': 'true' }, [
+                          h('td', {
+                            colspan: scheduleColumns.length,
+                            style: { height: `${paddingTop}px` }
+                          })
+                        ])
+                      : null,
+                    ...virtualRows.map((virtualRow) => {
+                      const row = rows[virtualRow.index];
+
+                      return (
                     h(
                       'tr',
-                      { key: row.id, 'data-sequence': row.original.sequence },
+                      {
+                        key: row.id,
+                        'aria-rowindex': virtualRow.index + 2,
+                        'data-sequence': row.original.sequence
+                      },
                       row.getVisibleCells().map((cell) =>
                         h('td', { key: cell.id }, [
                           h(FlexRender, {
@@ -296,12 +335,24 @@ const PaymentScheduleTable = defineComponent({
                         ])
                       )
                     )
-                  )
+                      );
+                    }),
+                    paddingBottom > 0
+                      ? h('tr', { class: 'virtual-table-spacer', 'aria-hidden': 'true' }, [
+                          h('td', {
+                            colspan: scheduleColumns.length,
+                            style: { height: `${paddingBottom}px` }
+                          })
+                        ])
+                      : null
+                  ]
             ])
           ])
         ])
         ])
-      );
+        );
+      });
+    };
   }
 });
 
