@@ -58,11 +58,10 @@ describe('chart data preparation', () => {
       })
     );
     const chart = preparePaymentBreakdownChart(projection.chartSeries);
-    const paymentLevelChart = preparePaymentBreakdownChart(projection.chartSeries, 'payment');
     const [principalDataset, interestDataset] = chart.data.datasets;
 
-    expect(chart.granularity).toBe('month');
-    expect(chart.data.labels?.length).toBeLessThanOrEqual(projection.schedule.length);
+    expect(chart.granularity).toBe('payment');
+    expect(chart.data.labels).toHaveLength(chart.sourcePointCount);
     expect(chart.data.datasets.map((dataset) => dataset.label)).toEqual([
       'Payment to principal',
       'Interest'
@@ -71,7 +70,7 @@ describe('chart data preparation', () => {
     expect(interestDataset.borderColor).toBe('#dc2626');
     expect(sumDataset(interestDataset.data)).toBe(projection.summary.totalInterestPaid);
     expect(sumDataset(principalDataset.data)).toBe(projection.summary.totalPrincipalPaid);
-    expect(paymentLevelChart.data.labels).not.toContain('2027-01-15');
+    expect(chart.data.labels).not.toContain('2027-01-15');
     expect(chart.sourcePointCount).toBe(
       projection.chartSeries.paymentBreakdown.filter(
         (point) => point.scheduledInterestPaid > 0 || point.scheduledPrincipalPaid > 0
@@ -79,7 +78,31 @@ describe('chart data preparation', () => {
     );
   });
 
-  it('uses yearly aggregation for dense weekly projections', () => {
+  it('keeps every bi-weekly payment as a distinct payment breakdown point', () => {
+    const projection = projectMortgageScenario(
+      makeScenario({
+        principalAmount: 250_000,
+        annualInterestRate: 0.045,
+        amortizationMonths: 300,
+        paymentFrequency: 'bi-weekly'
+      })
+    );
+    const regularPayments = projection.chartSeries.paymentBreakdown.filter(
+      (point) => point.scheduledInterestPaid > 0 || point.scheduledPrincipalPaid > 0
+    );
+    const breakdownChart = preparePaymentBreakdownChart(projection.chartSeries);
+
+    expect(breakdownChart.granularity).toBe('payment');
+    expect(breakdownChart.data.labels).toEqual(regularPayments.map((point) => point.date));
+    expect(breakdownChart.data.datasets[0]?.data).toEqual(
+      regularPayments.map((point) => point.scheduledPrincipalPaid)
+    );
+    expect(breakdownChart.data.datasets[1]?.data).toEqual(
+      regularPayments.map((point) => point.scheduledInterestPaid)
+    );
+  });
+
+  it('uses yearly aggregation for dense weekly balance projections', () => {
     const projection = projectMortgageScenario(
       makeScenario({
         principalAmount: 250_000,
@@ -89,11 +112,9 @@ describe('chart data preparation', () => {
       })
     );
     const balanceChart = prepareBalanceChart(projection.chartSeries);
-    const breakdownChart = preparePaymentBreakdownChart(projection.chartSeries);
 
     expect(chooseChartGranularity(projection.schedule.length)).toBe('year');
     expect(balanceChart.granularity).toBe('year');
-    expect(breakdownChart.granularity).toBe('year');
     expect(balanceChart.data.labels?.length).toBeLessThan(projection.schedule.length);
   });
 

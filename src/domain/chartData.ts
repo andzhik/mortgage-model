@@ -91,11 +91,10 @@ export function prepareBalanceChart(
 
 export function preparePaymentBreakdownChart(
   chartSeries: ProjectionChartSeries,
-  granularity?: ChartGranularity
+  granularity: ChartGranularity = 'payment'
 ): PreparedPaymentBreakdownChart {
   const regularPayments = chartSeries.paymentBreakdown.filter(isRegularPaymentPoint);
-  const resolvedGranularity = granularity ?? chooseChartGranularity(regularPayments.length);
-  const buckets = createPaymentBuckets(regularPayments, resolvedGranularity);
+  const buckets = createPaymentBuckets(regularPayments, granularity);
 
   return {
     data: {
@@ -124,7 +123,7 @@ export function preparePaymentBreakdownChart(
       ]
     },
     options: createLineOptions(),
-    granularity: resolvedGranularity,
+    granularity,
     sourcePointCount: regularPayments.length
   };
 }

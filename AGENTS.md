@@ -5,6 +5,7 @@
 - Use Bun (`bun.lock`): `bun run test`, `bun run typecheck`, `bun run build`.
 - Read `MORTGAGE_CALCULATOR_DESIGN.md` for product intent, but treat current tests and implementation as authoritative when it is stale.
 - Preserve unrelated work in the working tree.
+- Reflect changes in the documentation
 
 ## Architecture
 
