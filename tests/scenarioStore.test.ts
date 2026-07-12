@@ -154,6 +154,62 @@ describe('scenario store', () => {
     expect(saved.scenarios).toHaveLength(1);
   });
 
+  it('backs up persisted scenarios with dates after 2100 and resets safely', () => {
+    const storage = new MemoryStorage();
+    const scenario = createDefaultScenario(fixedNow, createSequentialIdFactory());
+    scenario.startDate = '27344-01-01';
+    scenario.initialTerm.startDate = scenario.startDate;
+    storage.setItem(SCENARIO_STORAGE_KEY, JSON.stringify({
+      schemaVersion: 1,
+      activeScenarioId: scenario.id,
+      scenarios: [scenario]
+    }));
+
+    const store = useScenarioStore({
+      repository: createLocalStorageRepository(storage, fixedNow),
+      now: fixedNow,
+      idFactory: createSequentialIdFactory(),
+      debounceMs: 1000
+    });
+
+    expect(store.activeScenario.value.startDate).toBe('2026-01-10');
+    expect([...storage.values.keys()].some((key) => key.startsWith(INVALID_BACKUP_KEY_PREFIX))).toBe(true);
+    expect(() => store.projection.value).not.toThrow();
+  });
+
+  it('caps keyboard-entered dates at the end of 2100', () => {
+    const store = useScenarioStore({
+      repository: createLocalStorageRepository(new MemoryStorage(), fixedNow),
+      now: fixedNow,
+      idFactory: createSequentialIdFactory(),
+      debounceMs: 1000
+    });
+
+    store.updateScenario({ startDate: '9999-01-01' });
+
+    expect(store.activeScenario.value.startDate).toBe('2100-12-31');
+    expect(store.activeScenario.value.initialTerm.startDate).toBe('2100-12-31');
+    expect(() => store.projection.value).not.toThrow();
+  });
+
+  it('keeps renewals valid when the start date reaches the supported ceiling', () => {
+    const store = useScenarioStore({
+      repository: createLocalStorageRepository(new MemoryStorage(), fixedNow),
+      now: fixedNow,
+      idFactory: createSequentialIdFactory(),
+      debounceMs: 1000
+    });
+    store.addRenewal();
+    store.addRenewal();
+
+    store.updateScenario({ startDate: '2100-12-31' });
+
+    expect(store.activeScenario.value.renewals.map((renewal) => renewal.effectiveDate)).toEqual([
+      '2100-12-31'
+    ]);
+    expect(() => store.projection.value).not.toThrow();
+  });
+
   it('keeps renewal dates ordered and unique when the mortgage start date advances', () => {
     const store = useScenarioStore({
       repository: createLocalStorageRepository(new MemoryStorage(), fixedNow),

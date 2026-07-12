@@ -6,6 +6,7 @@ import type {
   PaymentStrategy,
   RenewalEvent
 } from '../domain/mortgageTypes';
+import { isSupportedIsoDate } from '../domain/dateMath';
 
 export const SCENARIO_STORAGE_KEY = 'mortgage-model:v1:scenarios';
 export const INVALID_BACKUP_KEY_PREFIX = 'mortgage-model:v1:invalid-backup:';
@@ -176,6 +177,7 @@ function isMortgageScenario(value: unknown): value is MortgageScenario {
     typeof value.updatedAt === 'string' &&
     value.currency === 'CAD' &&
     typeof value.startDate === 'string' &&
+    isSupportedIsoDate(value.startDate) &&
     isPositiveFiniteNumber(value.principalAmount) &&
     isPositiveInteger(value.amortizationMonths) &&
     isPaymentFrequency(value.paymentFrequency) &&
@@ -195,6 +197,7 @@ function isMortgageTerm(value: unknown): value is MortgageTerm {
   return (
     typeof value.id === 'string' &&
     typeof value.startDate === 'string' &&
+    isSupportedIsoDate(value.startDate) &&
     isPositiveInteger(value.termMonths) &&
     isNonNegativeFiniteNumber(value.annualInterestRate) &&
     isPaymentFrequency(value.paymentFrequency) &&
@@ -211,6 +214,7 @@ function isRenewal(value: unknown): value is RenewalEvent {
   return (
     typeof value.id === 'string' &&
     typeof value.effectiveDate === 'string' &&
+    isSupportedIsoDate(value.effectiveDate) &&
     isPositiveInteger(value.termMonths) &&
     isNonNegativeFiniteNumber(value.annualInterestRate) &&
     (value.paymentFrequency === undefined || isPaymentFrequency(value.paymentFrequency)) &&
@@ -227,6 +231,7 @@ function isLumpSum(value: unknown): value is LumpSumEvent {
   return (
     typeof value.id === 'string' &&
     typeof value.date === 'string' &&
+    isSupportedIsoDate(value.date) &&
     isPositiveFiniteNumber(value.amount) &&
     (value.label === undefined || typeof value.label === 'string')
   );

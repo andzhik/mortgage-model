@@ -1,6 +1,25 @@
 import type { PaymentFrequency } from './mortgageTypes';
 
 const ISO_DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
+export const MAX_SUPPORTED_DATE = '2100-12-31';
+
+export function isSupportedIsoDate(value: string): boolean {
+  try {
+    parseIsoDate(value);
+    return value <= MAX_SUPPORTED_DATE;
+  } catch {
+    return false;
+  }
+}
+
+export function clampToSupportedDate(value: string): string | null {
+  try {
+    parseIsoDate(value);
+    return value > MAX_SUPPORTED_DATE ? MAX_SUPPORTED_DATE : value;
+  } catch {
+    return null;
+  }
+}
 
 export function parseIsoDate(value: string): Date {
   const match = ISO_DATE_PATTERN.exec(value);

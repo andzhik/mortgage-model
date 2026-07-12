@@ -8,7 +8,7 @@ import type {
   RenewalEvent
 } from '../domain/mortgageTypes';
 import { projectMortgageScenario } from '../domain/mortgageCalculator';
-import { addDays, addMonths } from '../domain/dateMath';
+import { addDays, addMonths, clampToSupportedDate, MAX_SUPPORTED_DATE } from '../domain/dateMath';
 import {
   createLocalStorageRepository,
   type ScenarioRepository,
@@ -207,7 +207,10 @@ export function useScenarioStore(options: ScenarioStoreOptions = {}) {
     }
 
     if (update.startDate !== undefined && update.startDate) {
-      const startDate = update.startDate;
+      const startDate = clampToSupportedDate(update.startDate);
+      if (!startDate) {
+        return;
+      }
       scenario.startDate = startDate;
       scenario.initialTerm.startDate = startDate;
       scenario.lumpSums = scenario.lumpSums.map((lumpSum) => ({
@@ -217,14 +220,17 @@ export function useScenarioStore(options: ScenarioStoreOptions = {}) {
       let earliestRenewalDate = startDate;
       scenario.renewals = [...scenario.renewals]
         .sort((left, right) => left.effectiveDate.localeCompare(right.effectiveDate))
-        .map((renewal) => {
+        .flatMap((renewal) => {
+          if (earliestRenewalDate > MAX_SUPPORTED_DATE) {
+            return [];
+          }
           const effectiveDate =
             renewal.effectiveDate < earliestRenewalDate
               ? earliestRenewalDate
               : renewal.effectiveDate;
           earliestRenewalDate = addDays(effectiveDate, 1);
 
-          return { ...renewal, effectiveDate };
+          return [{ ...renewal, effectiveDate }];
         });
     }
 
@@ -269,7 +275,10 @@ export function useScenarioStore(options: ScenarioStoreOptions = {}) {
     }
 
     if (update.date !== undefined && update.date) {
-      lumpSum.date = update.date < scenario.startDate ? scenario.startDate : update.date;
+      const date = clampToSupportedDate(update.date);
+      if (date) {
+        lumpSum.date = date < scenario.startDate ? scenario.startDate : date;
+      }
     }
 
     if (update.amount !== undefined) {
@@ -295,9 +304,16 @@ export function useScenarioStore(options: ScenarioStoreOptions = {}) {
     const previousRenewal = [...scenario.renewals].sort((left, right) =>
       left.effectiveDate.localeCompare(right.effectiveDate)
     ).at(-1);
-    const effectiveDate = previousRenewal
+    const proposedEffectiveDate = previousRenewal
       ? addMonths(previousRenewal.effectiveDate, previousRenewal.termMonths)
       : addMonths(scenario.startDate, scenario.initialTerm.termMonths);
+    const effectiveDate = proposedEffectiveDate > MAX_SUPPORTED_DATE
+      ? MAX_SUPPORTED_DATE
+      : proposedEffectiveDate;
+
+    if (scenario.renewals.some((renewal) => renewal.effectiveDate === effectiveDate)) {
+      return;
+    }
 
     scenario.renewals.push({
       id: idFactory('renewal'),
@@ -320,8 +336,11 @@ export function useScenarioStore(options: ScenarioStoreOptions = {}) {
     }
 
     if (update.effectiveDate !== undefined && update.effectiveDate) {
-      renewal.effectiveDate =
-        update.effectiveDate < scenario.startDate ? scenario.startDate : update.effectiveDate;
+      const effectiveDate = clampToSupportedDate(update.effectiveDate);
+      if (effectiveDate) {
+        renewal.effectiveDate =
+          effectiveDate < scenario.startDate ? scenario.startDate : effectiveDate;
+      }
       scenario.renewals.sort((left, right) =>
         left.effectiveDate.localeCompare(right.effectiveDate)
       );

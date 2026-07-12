@@ -2,6 +2,7 @@
 import { computed } from 'vue';
 import type { MortgageScenario, PaymentFrequency } from '../domain/mortgageTypes';
 import { PAYMENT_FREQUENCY_METADATA } from '../domain/paymentFrequency';
+import { MAX_SUPPORTED_DATE } from '../domain/dateMath';
 
 export type MortgageInputUpdate = Partial<{
   principalAmount: number;
@@ -83,6 +84,7 @@ function updateTerm(years: number, months: number): void {
           aria-label="Start date"
           type="date"
           :value="scenario.startDate"
+          :max="MAX_SUPPORTED_DATE"
           @input="updateStartDate"
         />
       </label>

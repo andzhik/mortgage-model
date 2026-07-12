@@ -118,6 +118,7 @@ Calculation assumptions:
 - Interest rate input is nominal annual rate.
 - Canadian fixed mortgages usually compound semi-annually, not in advance.
 - Payment dates begin from a user-selected start date.
+- User-entered and persisted scenario dates must not be later than `2100-12-31`.
 - Lump sums are applied before regular payment interest calculation if they fall on the same payment date.
 - Regular payment amount is recalculated at the start of each term using the remaining balance, rate, frequency, and remaining amortization.
 - At renewal, payment is recalculated based on remaining balance and remaining amortization.
