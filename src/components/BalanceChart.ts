@@ -13,6 +13,7 @@ import { formatMoney } from '../app/formatters';
 import { prepareBalanceChart } from '../domain/chartData';
 import type { ProjectionChartSeries } from '../domain/mortgageTypes';
 import ChartRenderer from './ChartRenderer';
+import { measureMortgageWork } from '../performance/uiPerformance';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Filler, Tooltip, Legend);
 
@@ -25,7 +26,9 @@ export default defineComponent({
     }
   },
   setup(props) {
-    const preparedChart = computed(() => prepareBalanceChart(props.chartSeries));
+    const preparedChart = computed(() =>
+      measureMortgageWork('balance chart preparation', () => prepareBalanceChart(props.chartSeries))
+    );
 
     return () => {
       const prepared = preparedChart.value;

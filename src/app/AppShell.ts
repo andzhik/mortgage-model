@@ -4,7 +4,7 @@ import {
   getCoreRowModel,
   useVueTable
 } from '@tanstack/vue-table';
-import { computed, defineComponent, h, reactive, watch } from 'vue';
+import { computed, defineComponent, h, onUpdated, reactive, watch } from 'vue';
 import { formatDate, formatMoney, formatPercent } from './formatters';
 import type {
   MortgageScenario,
@@ -24,6 +24,11 @@ import {
   type MortgageInputUpdate,
   type RenewalInputUpdate
 } from '../stores/scenarioStore';
+import {
+  beginMortgageUiUpdate,
+  finishMortgageUiUpdateAfterPaint,
+  measureMortgageWork
+} from '../performance/uiPerformance';
 
 type ScenarioOption = {
   readonly id: string;
@@ -242,7 +247,8 @@ const PaymentScheduleTable = defineComponent({
     });
 
     return () =>
-      h('section', { class: 'panel schedule-panel', 'aria-labelledby': 'schedule-heading' }, [
+      measureMortgageWork('payment table render function', () =>
+        h('section', { class: 'panel schedule-panel', 'aria-labelledby': 'schedule-heading' }, [
         h('div', { class: 'panel-heading' }, [
           h('h2', { id: 'schedule-heading' }, 'Payment schedule'),
           h('span', { class: 'status-pill' }, `${props.rows.length} rows`)
@@ -294,7 +300,8 @@ const PaymentScheduleTable = defineComponent({
             ])
           ])
         ])
-      ]);
+        ])
+      );
   }
 });
 
@@ -851,7 +858,10 @@ export default defineComponent({
   setup() {
     const store = useScenarioStore();
 
-    return () => {
+    watch(store.activeScenario, beginMortgageUiUpdate, { deep: true, flush: 'sync' });
+    onUpdated(finishMortgageUiUpdateAfterPaint);
+
+    return () => measureMortgageWork('AppShell render function', () => {
       const scenario = store.activeScenario.value;
       const projection = store.projection.value;
 
@@ -902,6 +912,6 @@ export default defineComponent({
           ])
         ])
       ]);
-    };
+    });
   }
 });

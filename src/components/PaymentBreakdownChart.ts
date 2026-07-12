@@ -11,6 +11,7 @@ import { formatMoney } from '../app/formatters';
 import { preparePaymentBreakdownChart } from '../domain/chartData';
 import type { ProjectionChartSeries } from '../domain/mortgageTypes';
 import ChartRenderer from './ChartRenderer';
+import { measureMortgageWork } from '../performance/uiPerformance';
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Tooltip, Legend);
 
@@ -23,7 +24,11 @@ export default defineComponent({
     }
   },
   setup(props) {
-    const preparedChart = computed(() => preparePaymentBreakdownChart(props.chartSeries));
+    const preparedChart = computed(() =>
+      measureMortgageWork('payment chart preparation', () =>
+        preparePaymentBreakdownChart(props.chartSeries)
+      )
+    );
 
     return () => {
       const prepared = preparedChart.value;

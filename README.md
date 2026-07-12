@@ -50,6 +50,47 @@ bun run build      # typecheck and create a production build
 
 Run the most relevant focused test while iterating, then run the complete test and build commands before handing off a meaningful change.
 
+## Measuring UI performance
+
+The app includes an opt-in browser profiler for investigating input lag. Start the app and open the local URL printed by Vite:
+
+```sh
+bun run dev
+```
+
+Open the browser's developer tools, select the Console, and enable measurements:
+
+```js
+window.__mortgagePerformance.enable()
+```
+
+Change a valid mortgage input such as **Mortgage amount**. Each update reports:
+
+- `projection calculation`: pure mortgage schedule and projection generation;
+- `balance chart preparation`: creation of the balance-chart dataset;
+- `payment chart preparation`: creation of the payment-breakdown dataset;
+- `AppShell render function`: root Vue virtual-node construction;
+- `payment table render function`: schedule row and cell virtual-node construction;
+- `scenario mutation → next paint`: approximate end-to-end time from the scenario change through the next browser paint.
+
+The mutation-to-next-paint result is the closest built-in measurement of user-visible latency. It deliberately waits for two animation frames, so use it for relative before/after comparisons rather than treating it as a precise breakdown of browser work. Use the browser's Performance panel when layout, paint, scripting, or Chart.js animation must be separated.
+
+For useful comparisons:
+
+1. Use the same browser, viewport, scenario, input, and build mode.
+2. Ignore the first update so browser and JavaScript warm-up do not skew the result.
+3. Record several updates and compare the median rather than a single result.
+4. Test both a normal monthly scenario and a dense weekly 25- or 30-year scenario.
+5. Keep DevTools throttling settings unchanged between runs.
+
+Disable console measurements when finished:
+
+```js
+window.__mortgagePerformance.disable()
+```
+
+Profiling is disabled by default and does not change mortgage calculations.
+
 ## How the model works
 
 The annual interest-rate input is a nominal decimal rate internally (`0.05` means 5%). For the default Canadian convention, the calculator converts the nominal rate compounded semi-annually into an effective rate for the selected payment frequency.

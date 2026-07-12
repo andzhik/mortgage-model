@@ -14,6 +14,7 @@ import {
   type ScenarioRepository,
   type StoredScenarioState
 } from '../persistence/localStorageRepository';
+import { measureMortgageWork } from '../performance/uiPerformance';
 
 export type MortgageInputUpdate = Partial<{
   principalAmount: number;
@@ -106,7 +107,9 @@ export function useScenarioStore(options: ScenarioStoreOptions = {}) {
     const active = state.scenarios.find((scenario) => scenario.id === state.activeScenarioId);
     return active ?? state.scenarios[0];
   });
-  const projection = computed<MortgageProjection>(() => projectMortgageScenario(activeScenario.value));
+  const projection = computed<MortgageProjection>(() =>
+    measureMortgageWork('projection calculation', () => projectMortgageScenario(activeScenario.value))
+  );
 
   if (loaded.status !== 'loaded') {
     scheduleSave();
