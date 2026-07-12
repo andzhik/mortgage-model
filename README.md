@@ -40,6 +40,18 @@ Vite prints the local development URL. Production assets are emitted to `dist/` 
 bun run build
 ```
 
+## GitHub Pages deployment
+
+The GitHub Actions workflow in `.github/workflows/pages.yml` installs dependencies,
+runs the complete test suite, builds the app with the repository-relative asset
+path, and publishes `dist/` to GitHub Pages after pushes to `main`. Pull requests
+run the same checks and build without deploying. The workflow can also be started
+manually from the Actions tab.
+
+Before the first deployment, set the repository's **Settings → Pages → Build and
+deployment → Source** to **GitHub Actions**. The published site will be available at
+`https://<owner>.github.io/<repository>/`.
+
 ## Quality checks
 
 ```sh
