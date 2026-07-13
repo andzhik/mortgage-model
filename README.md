@@ -4,6 +4,8 @@ A browser-only mortgage planning tool for modelling Canadian mortgages across th
 
 > This project is a planning aid, not financial advice. Results depend on the assumptions entered and may differ from a lender's calculations, fees, prepayment rules, or rounding.
 
+![Advanced Mortgage Calculator dashboard](docs/mortgage-calculator.png)
+
 ## Features
 
 - Weekly, bi-weekly, semi-monthly, and monthly payment schedules
